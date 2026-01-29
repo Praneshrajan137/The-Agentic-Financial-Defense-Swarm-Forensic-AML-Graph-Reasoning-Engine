@@ -1,0 +1,56 @@
+# Green Financial Crime Agent - Docker Compose Configuration
+# The Panopticon Protocol: Zero-Failure Synthetic Financial Crime Simulator
+#
+# Usage:
+#   docker-compose up -d        # Start in detached mode
+#   docker-compose logs -f      # View logs
+#   docker-compose down         # Stop and remove containers
+#
+# Generate data:
+#   docker-compose run --rm green-agent python main.py generate --output-dir /mnt/user-data/outputs
+
+version: '3.8'
+
+services:
+  green-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: green-financial-crime-agent
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount outputs directory for persistence
+      - ./outputs:/mnt/user-data/outputs
+    environment:
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - green-agent-network
+
+networks:
+  green-agent-network:
+    driver: bridge
+
+# Optional: Add a separate service for data generation
+# Uncomment to use:
+#
+#   green-agent-generator:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     container_name: green-agent-generator
+#     volumes:
+#       - ./outputs:/mnt/user-data/outputs
+#     environment:
+#       - LOG_LEVEL=INFO
+#     command: ["python", "main.py", "generate", "--output-dir", "/mnt/user-data/outputs"]
+#     networks:
+#       - green-agent-network

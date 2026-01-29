@@ -1,0 +1,523 @@
+openapi: 3.0.0
+info:
+  title: Green Agent A2A API
+  version: 1.0.0
+  description: |
+    Agent2Agent protocol for synthetic financial crime data generation.
+    
+    The Green Agent exposes synthetic AML training data via HTTP/JSON-RPC endpoints.
+    This API allows the Purple Agent (investigation AI) to:
+    - Retrieve transaction histories
+    - Access KYC profiles
+    - Request investigation assessments
+  contact:
+    name: Green Agent Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+tags:
+  - name: A2A Tools
+    description: Agent-to-Agent tool endpoints for data retrieval
+  - name: Investigation
+    description: Investigation assessment endpoints
+  - name: System
+    description: System health and manifest endpoints
+
+paths:
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check endpoint
+      description: Returns the current health status of the Green Agent
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Agent is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /agent.json:
+    get:
+      tags:
+        - System
+      summary: Agent manifest
+      description: Returns the A2A manifest describing agent capabilities
+      operationId: getManifest
+      responses:
+        '200':
+          description: Agent manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentManifest'
+
+  /a2a/investigation_assessment:
+    post:
+      tags:
+        - Investigation
+      summary: Request investigation simulation
+      description: |
+        Evaluates a participant's investigation and returns a scored assessment.
+        This endpoint is used by the Purple Agent to get feedback on investigations.
+      operationId: investigationAssessment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestigationAssessmentRequest'
+      responses:
+        '200':
+          description: Investigation assessment result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationAssessmentResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Participant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /a2a/tools/get_transactions:
+    post:
+      tags:
+        - A2A Tools
+      summary: Retrieve transaction history
+      description: |
+        Returns the transaction history for a specified account.
+        Transactions include both legitimate and potentially suspicious activity.
+      operationId: getTransactions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetTransactionsRequest'
+      responses:
+        '200':
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+        '400':
+          description: Invalid account ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /a2a/tools/get_kyc_profile:
+    post:
+      tags:
+        - A2A Tools
+      summary: Retrieve KYC profile
+      description: |
+        Returns the Know Your Customer (KYC) profile for a specified account.
+        Includes entity information, risk scores, and verification status.
+      operationId: getKycProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetKycProfileRequest'
+      responses:
+        '200':
+          description: KYC profile data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycProfileResponse'
+        '400':
+          description: Invalid account ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /a2a/tools/get_account_connections:
+    post:
+      tags:
+        - A2A Tools
+      summary: Retrieve account connections
+      description: |
+        Returns accounts connected to the specified account through transactions.
+        Useful for network analysis and tracing money flows.
+      operationId: getAccountConnections
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetAccountConnectionsRequest'
+      responses:
+        '200':
+          description: Connected accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountConnectionsResponse'
+        '404':
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - version
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          example: healthy
+        version:
+          type: string
+          example: "1.0.0"
+        graph_loaded:
+          type: boolean
+          example: true
+        node_count:
+          type: integer
+          example: 1000
+        edge_count:
+          type: integer
+          example: 10000
+
+    AgentManifest:
+      type: object
+      required:
+        - name
+        - version
+        - description
+        - capabilities
+        - endpoints
+      properties:
+        name:
+          type: string
+          example: green-financial-crime-agent
+        version:
+          type: string
+          example: "1.0.0"
+        description:
+          type: string
+          example: Synthetic financial crime data generator
+        capabilities:
+          type: array
+          items:
+            type: string
+          example:
+            - generate_graph
+            - inject_structuring
+            - inject_layering
+            - get_transactions
+            - get_kyc_profile
+        endpoints:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            health: /health
+            manifest: /agent.json
+            transactions: /a2a/tools/get_transactions
+            kyc: /a2a/tools/get_kyc_profile
+            assessment: /a2a/investigation_assessment
+
+    InvestigationAssessmentRequest:
+      type: object
+      required:
+        - participant_id
+      properties:
+        participant_id:
+          type: string
+          description: Unique identifier for the investigation participant
+          example: "participant_001"
+        investigation_data:
+          type: object
+          description: Optional investigation findings submitted by participant
+          additionalProperties: true
+
+    InvestigationAssessmentResponse:
+      type: object
+      required:
+        - score
+        - feedback
+      properties:
+        score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: Overall investigation score (0-100)
+          example: 85.5
+        feedback:
+          type: string
+          description: Detailed feedback on the investigation
+          example: "Good identification of structuring pattern. Consider deeper analysis of temporal clustering."
+        rubric_breakdown:
+          type: object
+          description: Detailed scoring by category
+          properties:
+            pattern_identification:
+              type: number
+              example: 90
+            evidence_quality:
+              type: number
+              example: 85
+            narrative_clarity:
+              type: number
+              example: 80
+            completeness:
+              type: number
+              example: 87
+        missed_indicators:
+          type: array
+          items:
+            type: string
+          description: Indicators the participant may have missed
+
+    GetTransactionsRequest:
+      type: object
+      required:
+        - account_id
+      properties:
+        account_id:
+          type: string
+          description: Account identifier to retrieve transactions for
+          example: "node_42"
+        start_date:
+          type: string
+          format: date-time
+          description: Filter transactions after this date
+        end_date:
+          type: string
+          format: date-time
+          description: Filter transactions before this date
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+          description: Maximum number of transactions to return
+        direction:
+          type: string
+          enum: [inbound, outbound, both]
+          default: both
+          description: Filter by transaction direction
+
+    TransactionListResponse:
+      type: object
+      required:
+        - account_id
+        - transactions
+      properties:
+        account_id:
+          type: string
+          example: "node_42"
+        transaction_count:
+          type: integer
+          example: 25
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+
+    Transaction:
+      type: object
+      required:
+        - transaction_id
+        - source
+        - target
+        - amount
+        - timestamp
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+          example: "txn_a1b2c3d4"
+        source:
+          type: string
+          description: Source account ID
+          example: "node_10"
+        target:
+          type: string
+          description: Target account ID
+          example: "node_42"
+        amount:
+          type: number
+          format: float
+          description: Transaction amount in USD
+          example: 9500.00
+        currency:
+          type: string
+          default: USD
+          example: USD
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-01-15T14:30:00Z"
+        transaction_type:
+          type: string
+          enum: [wire, ach, cash, internal]
+          example: wire
+        memo:
+          type: string
+          description: Transaction memo/description
+          example: "Business payment"
+
+    GetKycProfileRequest:
+      type: object
+      required:
+        - account_id
+      properties:
+        account_id:
+          type: string
+          description: Account identifier to retrieve KYC for
+          example: "node_42"
+
+    KycProfileResponse:
+      type: object
+      required:
+        - account_id
+        - entity_type
+        - name
+      properties:
+        account_id:
+          type: string
+          example: "node_42"
+        entity_type:
+          type: string
+          enum: [person, company, bank]
+          example: person
+        name:
+          type: string
+          example: "John Smith"
+        company:
+          type: string
+          example: "Acme Corp"
+        address:
+          type: string
+          example: "123 Main St, London, UK"
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "GB"
+        swift_code:
+          type: string
+          example: "BARCGB22"
+        iban:
+          type: string
+          example: "GB82WEST12345698765432"
+        risk_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Risk score from 0 (low) to 1 (high)
+          example: 0.35
+        verification_status:
+          type: string
+          enum: [verified, pending, failed]
+          example: verified
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-06-01T10:00:00Z"
+        last_activity:
+          type: string
+          format: date-time
+          example: "2026-01-20T16:45:00Z"
+
+    GetAccountConnectionsRequest:
+      type: object
+      required:
+        - account_id
+      properties:
+        account_id:
+          type: string
+          example: "node_42"
+        depth:
+          type: integer
+          minimum: 1
+          maximum: 3
+          default: 1
+          description: How many hops to traverse in the network
+
+    AccountConnectionsResponse:
+      type: object
+      required:
+        - account_id
+        - connections
+      properties:
+        account_id:
+          type: string
+          example: "node_42"
+        connection_count:
+          type: integer
+          example: 15
+        connections:
+          type: array
+          items:
+            type: object
+            properties:
+              account_id:
+                type: string
+              relationship:
+                type: string
+                enum: [sender, receiver, both]
+              transaction_count:
+                type: integer
+              total_amount:
+                type: number
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: "NOT_FOUND"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Account not found: node_999"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true

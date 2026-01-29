@@ -1,0 +1,8 @@
+# Placeholder for scripts directory
+# This directory contains deterministic Python scripts for:
+# - generate_graph.py: Graph generation
+# - inject_structuring.py: Fan-in pattern injection
+# - inject_layering.py: Decay chain injection
+# - detect_cycles.py: Graph validation
+# - faker_entities.py: Entity generation
+# - sdv_correlations.py: Statistical correlation

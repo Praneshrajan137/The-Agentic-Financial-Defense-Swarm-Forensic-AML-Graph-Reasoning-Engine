@@ -1,0 +1,47 @@
+# Green Financial Crime Agent - Dependencies
+# The Panopticon Protocol: Zero-Failure Synthetic Financial Crime Simulator
+
+# =============================================================================
+# Core Graph Processing
+# =============================================================================
+networkx>=3.0                    # Scale-free graph generation and analysis
+
+# =============================================================================
+# Synthetic Data Generation
+# =============================================================================
+faker>=18.0                      # Entity generation (names, companies, accounts)
+sdv>=1.0                         # Statistical Data Vault - correlation modeling
+
+# =============================================================================
+# API & Serialization
+# =============================================================================
+fastapi>=0.100                   # A2A Protocol HTTP interface
+uvicorn>=0.23                    # ASGI server for FastAPI
+pydantic>=2.0                    # Data validation
+protobuf>=4.0                    # Binary serialization (80% size reduction)
+httpx>=0.24                      # Async HTTP client for testing
+
+# =============================================================================
+# Testing
+# =============================================================================
+pytest>=7.0                      # Test framework
+pytest-cov>=4.0                  # Coverage reporting (target: 90%+)
+pytest-asyncio>=0.21             # Async test support
+
+# =============================================================================
+# Development & Quality
+# =============================================================================
+black>=23.0                      # Code formatting
+ruff>=0.1.0                      # Fast linting
+mypy>=1.5                        # Type checking
+
+# =============================================================================
+# Performance & Profiling
+# =============================================================================
+memory-profiler>=0.60            # Memory usage tracking (<2GB requirement)
+
+# =============================================================================
+# Optional: Visualization (for debugging)
+# =============================================================================
+# matplotlib>=3.7                # Graph visualization
+# seaborn>=0.12                  # Statistical plots

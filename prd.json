@@ -1,0 +1,158 @@
+{
+  "project": {
+    "name": "Green Financial Crime Agent",
+    "codename": "The Panopticon Protocol",
+    "version": "1.0.0",
+    "description": "Zero-Failure Synthetic Financial Crime Simulator"
+  },
+  "user_stories": [
+    {
+      "id": "US-001",
+      "title": "Generate Scale-Free Graph",
+      "description": "As the system, I need to generate a scale-free graph with 1,000 nodes and ~10,000 edges representing a financial network",
+      "status": "completed",
+      "priority": 1,
+      "acceptance_criteria": [
+        "Graph has exactly 1,000 nodes",
+        "Graph has approximately 10,000 edges (±1,000)",
+        "Degree distribution follows power-law (scale-free property)",
+        "Each node has Faker-generated attributes (name, address, SWIFT code)",
+        "Generation completes in <10 seconds",
+        "Memory usage <2GB",
+        "Graph serialized to pickle format in /outputs"
+      ],
+      "tasks": [
+        {"id": "US-001-T1", "task": "Write failing tests for graph generation", "status": "completed"},
+        {"id": "US-001-T2", "task": "Implement generate_scale_free_graph function", "status": "completed"},
+        {"id": "US-001-T3", "task": "Add entity attributes using Faker", "status": "completed"},
+        {"id": "US-001-T4", "task": "Add transaction attributes to edges", "status": "completed"},
+        {"id": "US-001-T5", "task": "Validate scale-free distribution", "status": "completed"}
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Inject Structuring Crime",
+      "description": "As the system, I need to inject structuring (smurfing) crime pattern with 20 transfers to 1 mule, each <$10k",
+      "status": "completed",
+      "priority": 2,
+      "acceptance_criteria": [
+        "Randomly select 1 mule node from baseline graph",
+        "Create 20 new source nodes (smurfs)",
+        "Generate 20 edges with amount in [$9,000, $9,800]",
+        "All timestamps within 48-hour window",
+        "Ground truth ledger saved to JSON with mule ID and source IDs",
+        "All crime edges labeled for training"
+      ],
+      "tasks": [
+        {"id": "US-002-T1", "task": "Write failing tests for structuring injection", "status": "completed"},
+        {"id": "US-002-T2", "task": "Implement inject_structuring function", "status": "completed"},
+        {"id": "US-002-T3", "task": "Add timestamp generation within window", "status": "completed"},
+        {"id": "US-002-T4", "task": "Implement crime labeling", "status": "completed"},
+        {"id": "US-002-T5", "task": "Validate against CTR threshold", "status": "completed"}
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Inject Layering Crime",
+      "description": "As the system, I need to inject layering crime pattern with chain transfers and 2-5% decay per hop",
+      "status": "completed",
+      "priority": 3,
+      "acceptance_criteria": [
+        "Randomly select source and destination nodes",
+        "Create chain of 5-7 intermediate nodes",
+        "Apply 2-5% random decay at each hop",
+        "All hops occur within 24-hour window",
+        "NO cycles in chain (validated)",
+        "Ground truth ledger saved to JSON with full chain IDs",
+        "All crime edges labeled for training"
+      ],
+      "tasks": [
+        {"id": "US-003-T1", "task": "Write failing tests for layering injection", "status": "completed"},
+        {"id": "US-003-T2", "task": "Implement inject_layering function", "status": "completed"},
+        {"id": "US-003-T3", "task": "Implement cycle detection validation", "status": "completed"},
+        {"id": "US-003-T4", "task": "Implement decay calculation", "status": "completed"},
+        {"id": "US-003-T5", "task": "Validate chain structure", "status": "completed"}
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Build FastAPI A2A Interface",
+      "description": "As the system, I need to expose data via Agent2Agent protocol with HTTP/JSON-RPC endpoints",
+      "status": "completed",
+      "priority": 4,
+      "acceptance_criteria": [
+        "FastAPI server listens on port 8000",
+        "Endpoint /a2a/tools/get_transactions returns transaction list",
+        "Endpoint /a2a/tools/get_kyc_profile returns node attributes",
+        "Endpoint /a2a/investigation_assessment returns scored feedback",
+        "agent.json manifest served at /agent.json",
+        "All responses follow OpenAPI spec (API-spec.yml)"
+      ],
+      "tasks": [
+        {"id": "US-004-T1", "task": "Write failing tests for A2A endpoints", "status": "completed"},
+        {"id": "US-004-T2", "task": "Implement agent.json manifest endpoint", "status": "completed"},
+        {"id": "US-004-T3", "task": "Implement get_transactions endpoint", "status": "completed"},
+        {"id": "US-004-T4", "task": "Implement get_kyc_profile endpoint", "status": "completed"},
+        {"id": "US-004-T5", "task": "Implement investigation_assessment endpoint", "status": "completed"}
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Implement Statistical Validation Suite",
+      "description": "As the system, I need to validate graph properties and crime injection correctness to ensure data quality",
+      "status": "completed",
+      "priority": 5,
+      "acceptance_criteria": [
+        "Test: Degree distribution matches power-law (scale-free property)",
+        "Test: Structuring amounts all < $10,000 (CTR threshold)",
+        "Test: Layering chain has 5-7 hops with no cycles",
+        "Test: Ground truth ledger complete and accurate",
+        "Test: All crime edges properly labeled",
+        "90%+ test coverage achieved"
+      ],
+      "tasks": [
+        {"id": "US-005-T1", "task": "Write tests for power-law degree distribution", "status": "completed"},
+        {"id": "US-005-T2", "task": "Write tests for structuring CTR compliance", "status": "completed"},
+        {"id": "US-005-T3", "task": "Write tests for layering chain integrity", "status": "completed"},
+        {"id": "US-005-T4", "task": "Write tests for ground truth ledger accuracy", "status": "completed"},
+        {"id": "US-005-T5", "task": "Achieve 90%+ test coverage", "status": "completed"}
+      ]
+    }
+  ],
+  "progress": {
+    "total_stories": 5,
+    "completed_stories": 5,
+    "total_tasks": 25,
+    "completed_tasks": 25,
+    "current_iteration": "final",
+    "last_updated": "2026-01-29T15:00:00Z"
+  },
+  "config": {
+    "graph": {
+      "n_nodes": 1000,
+      "alpha": 0.41,
+      "beta": 0.54,
+      "gamma": 0.05,
+      "target_edges": 10000
+    },
+    "structuring": {
+      "num_sources": 20,
+      "min_amount": 9000.0,
+      "max_amount": 9800.0,
+      "time_window_hours": 48
+    },
+    "layering": {
+      "chain_length_min": 5,
+      "chain_length_max": 7,
+      "min_decay": 0.02,
+      "max_decay": 0.05,
+      "initial_amount": 100000.0,
+      "time_window_hours": 24
+    },
+    "performance": {
+      "max_generation_time_seconds": 10,
+      "max_memory_gb": 2,
+      "target_test_coverage": 0.90
+    }
+  }
+}
