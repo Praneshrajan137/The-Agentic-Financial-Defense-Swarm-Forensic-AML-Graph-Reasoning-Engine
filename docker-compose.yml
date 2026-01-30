@@ -2,16 +2,21 @@
 # The Panopticon Protocol: Zero-Failure Synthetic Financial Crime Simulator
 #
 # Usage:
-#   docker-compose up -d        # Start in detached mode
-#   docker-compose logs -f      # View logs
-#   docker-compose down         # Stop and remove containers
+#   docker-compose up --build              # Build and start all services
+#   docker-compose up -d                   # Start in detached mode
+#   docker-compose logs -f green-agent     # View Green Agent logs
+#   docker-compose run purple-agent        # Run Purple Agent investigation
+#   docker-compose down                    # Stop and remove containers
 #
-# Generate data:
-#   docker-compose run --rm green-agent python main.py generate --output-dir /mnt/user-data/outputs
+# Reproducibility:
+#   SEED=42 DIFFICULTY=5 docker-compose up --build
 
 version: '3.8'
 
 services:
+  # ==========================================================================
+  # GREEN AGENT - The Judge (Server)
+  # ==========================================================================
   green-agent:
     build:
       context: .
@@ -25,32 +30,80 @@ services:
     environment:
       - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
+      - SEED=${SEED:-42}
+      - DIFFICULTY=${DIFFICULTY:-5}
+    # Generate data and start server in one process (data stays in memory)
+    command: >
+      python main.py serve
+      --host 0.0.0.0
+      --port 8000
+      --generate-on-startup
+      --seed ${SEED:-42}
+      --difficulty ${DIFFICULTY:-5}
+      --output-dir /mnt/user-data/outputs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 30s
     networks:
-      - green-agent-network
+      - benchmark-network
+
+  # ==========================================================================
+  # PURPLE AGENT - Baseline Investigator (Client)
+  # ==========================================================================
+  purple-agent:
+    build:
+      context: ./purple_agent
+      dockerfile: Dockerfile
+    container_name: purple-baseline-agent
+    depends_on:
+      green-agent:
+        condition: service_healthy
+    environment:
+      - GREEN_AGENT_URL=http://green-agent:8000
+      - PARTICIPANT_ID=${PARTICIPANT_ID:-baseline_purple_agent}
+      - PYTHONUNBUFFERED=1
+    command: >
+      --green-url http://green-agent:8000
+      --participant-id ${PARTICIPANT_ID:-baseline_purple_agent}
+      --nodes 0 42 100
+    networks:
+      - benchmark-network
+    # Purple agent runs once and exits
+    restart: "no"
+
+  # ==========================================================================
+  # BENCHMARK RUNNER - Reproducibility Demonstration
+  # ==========================================================================
+  benchmark-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: benchmark-runner
+    volumes:
+      - ./outputs:/mnt/user-data/outputs
+      - ./results:/mnt/user-data/results
+    environment:
+      - SEED=${SEED:-42}
+      - DIFFICULTY=${DIFFICULTY:-5}
+      - RUNS=${RUNS:-3}
+      - PYTHONUNBUFFERED=1
+    command: >
+      python scripts/run_benchmark.py
+      --seed ${SEED:-42}
+      --difficulty ${DIFFICULTY:-5}
+      --runs ${RUNS:-3}
+      --output /mnt/user-data/results/benchmark_results.json
+    networks:
+      - benchmark-network
+    profiles:
+      - benchmark
+    restart: "no"
 
 networks:
-  green-agent-network:
+  benchmark-network:
     driver: bridge
-
-# Optional: Add a separate service for data generation
-# Uncomment to use:
-#
-#   green-agent-generator:
-#     build:
-#       context: .
-#       dockerfile: Dockerfile
-#     container_name: green-agent-generator
-#     volumes:
-#       - ./outputs:/mnt/user-data/outputs
-#     environment:
-#       - LOG_LEVEL=INFO
-#     command: ["python", "main.py", "generate", "--output-dir", "/mnt/user-data/outputs"]
-#     networks:
-#       - green-agent-network
+    name: panopticon-network

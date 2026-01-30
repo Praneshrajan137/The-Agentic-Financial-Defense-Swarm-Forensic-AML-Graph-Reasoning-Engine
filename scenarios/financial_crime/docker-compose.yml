@@ -1,0 +1,71 @@
+# Financial Crime Investigation Benchmark - Docker Compose
+# The Panopticon Protocol
+#
+# Usage:
+#   cd scenarios/financial_crime/
+#   docker-compose up --build              # Build and run
+#   docker-compose run purple_agent        # Run Purple Agent separately
+#
+# Environment Variables:
+#   SEED: Random seed (default: 42)
+#   DIFFICULTY: Crime difficulty 1-10 (default: 5)
+
+version: '3.8'
+
+services:
+  # Green Agent - The Judge (Server)
+  green_agent:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: financial-crime-green
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../outputs:/mnt/user-data/outputs
+    environment:
+      - SEED=${SEED:-42}
+      - DIFFICULTY=${DIFFICULTY:-5}
+      - PYTHONUNBUFFERED=1
+    # Generate data and start server in one process (data stays in memory)
+    command: >
+      python main.py serve
+      --host 0.0.0.0
+      --port 8000
+      --generate-on-startup
+      --seed ${SEED:-42}
+      --difficulty ${DIFFICULTY:-5}
+      --output-dir /mnt/user-data/outputs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - benchmark-network
+
+  # Purple Agent - Baseline Investigator (Client)
+  purple_agent:
+    build:
+      context: ../../purple_agent
+      dockerfile: Dockerfile
+    container_name: financial-crime-purple-baseline
+    depends_on:
+      green_agent:
+        condition: service_healthy
+    environment:
+      - GREEN_AGENT_URL=http://green_agent:8000
+      - PARTICIPANT_ID=${PARTICIPANT_ID:-baseline_purple_agent}
+      - PYTHONUNBUFFERED=1
+    command: >
+      --green-url http://green_agent:8000
+      --participant-id ${PARTICIPANT_ID:-baseline_purple_agent}
+      --nodes 0 42 100
+    networks:
+      - benchmark-network
+    restart: "no"
+
+networks:
+  benchmark-network:
+    driver: bridge

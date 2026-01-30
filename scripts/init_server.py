@@ -1,36 +1,37 @@
+#!/usr/bin/env python3
 """
-Main entry point for Green Financial Crime Agent.
+Deterministic Server Initialization Script
+==========================================
+Generates synthetic data and starts the A2A server with deterministic configuration.
 
-The Panopticon Protocol: Zero-Failure Synthetic Financial Crime Simulator
+This script ensures reproducible startup by:
+1. Setting all random seeds before any data generation
+2. Generating synthetic financial crime data with fixed configuration
+3. Loading data into the A2A interface
+4. Starting the server
 
 Usage:
-    python main.py generate --output-dir ./outputs
-    python main.py generate --output-dir ./outputs --difficulty 8
-    python main.py serve
+    python scripts/init_server.py --seed 42 --difficulty 5 --port 8000
+
+Environment Variables (override CLI args):
+    SEED: Random seed (default: 42)
+    DIFFICULTY: Crime difficulty 1-10 (default: 5)
+    PORT: Server port (default: 8000)
+    HOST: Server host (default: 0.0.0.0)
 """
+
 import argparse
 import logging
-import json
+import os
+import sys
+import random
+import numpy as np
 from pathlib import Path
 
-import networkx as nx
+# Add parent directory to path for imports
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.graph_generator import (
-    generate_scale_free_graph,
-    add_entity_attributes,
-    add_transaction_attributes,
-    save_graph
-)
-from src.core.crime_injector import (
-    inject_structuring,
-    inject_layering,
-    StructuringConfig,
-    LayeringConfig,
-    save_ground_truth
-)
-from src.core.a2a_interface import app, set_graph, set_ground_truth, set_evidence
-
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -38,29 +39,77 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 5) -> None:
+def set_all_seeds(seed: int) -> None:
     """
-    Generate complete synthetic financial crime dataset WITH EVIDENCE.
+    Set all random seeds for reproducibility.
     
-    Creates a scale-free graph with entity and transaction attributes,
-    injects structuring and layering crime patterns with configurable difficulty,
-    generates evidence artifacts, and saves all outputs.
+    Args:
+        seed: The seed value to use
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    
+    # Set Faker seed
+    try:
+        from faker import Faker
+        Faker.seed(seed)
+    except ImportError:
+        pass
+    
+    # Set environment variable for any subprocess
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    
+    logger.info(f"All random seeds set to: {seed}")
+
+
+def generate_and_load_data(
+    output_dir: Path,
+    seed: int = 42,
+    difficulty: int = 5
+) -> bool:
+    """
+    Generate synthetic data and load into A2A interface.
     
     Args:
         output_dir: Directory for output files
         seed: Random seed for reproducibility
-        difficulty: Crime detection difficulty (1=trivial, 10=expert)
+        difficulty: Crime detection difficulty (1-10)
+        
+    Returns:
+        True if successful
     """
+    import json
+    import networkx as nx
+    
+    from src.core.graph_generator import (
+        generate_scale_free_graph,
+        add_entity_attributes,
+        add_transaction_attributes,
+        save_graph
+    )
+    from src.core.crime_injector import (
+        inject_structuring,
+        inject_layering,
+        StructuringConfig,
+        LayeringConfig,
+        save_ground_truth
+    )
+    from src.core.a2a_interface import set_graph, set_ground_truth, set_evidence
+    
     logger.info("=" * 60)
-    logger.info("Starting ENHANCED synthetic financial crime data generation")
-    logger.info(f"Difficulty Level: {difficulty}/10")
+    logger.info("DETERMINISTIC DATA GENERATION")
+    logger.info(f"Seed: {seed}")
+    logger.info(f"Difficulty: {difficulty}")
     logger.info("=" * 60)
+    
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Step 1: Generate baseline graph
     logger.info("Step 1: Generating scale-free baseline economy...")
     G = generate_scale_free_graph(n_nodes=1000, seed=seed)
     
-    # Convert MultiDiGraph to DiGraph if needed (scale_free_graph returns MultiDiGraph)
+    # Convert MultiDiGraph to DiGraph if needed
     if isinstance(G, nx.MultiDiGraph):
         G = nx.DiGraph(G)
         logger.info("  - Converted MultiDiGraph to DiGraph")
@@ -77,7 +126,7 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     G = add_transaction_attributes(G, seed=seed)
     logger.info("  - Added amounts, timestamps, transaction types to all edges")
     
-    # Step 4: Inject structuring crime with difficulty and evidence
+    # Step 4: Inject structuring crime
     logger.info(f"Step 4: Injecting structuring (difficulty {difficulty})...")
     mule_id = list(G.nodes())[0]
     structuring_config = StructuringConfig(
@@ -96,7 +145,7 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     logger.info(f"  - Total amount: ${structuring_crime.metadata['total_amount']:,.2f}")
     logger.info(f"  - Evidence artifacts: {len(structuring_evidence)}")
     
-    # Step 5: Inject layering crime with difficulty and evidence
+    # Step 5: Inject layering crime
     logger.info(f"Step 5: Injecting layering (difficulty {difficulty})...")
     source_node = list(G.nodes())[10]
     dest_node = list(G.nodes())[20]
@@ -116,21 +165,17 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     logger.info(f"  - Chain length: {layering_crime.metadata.get('effective_chain_length', layering_config.chain_length)}")
     logger.info(f"  - Initial amount: ${layering_crime.metadata['initial_amount']:,.2f}")
     logger.info(f"  - Final amount: ${layering_crime.metadata['final_amount']:,.2f}")
-    logger.info(f"  - Total decay: {layering_crime.metadata['total_decay'] * 100:.2f}%")
     logger.info(f"  - Evidence artifacts: {len(layering_evidence)}")
     
-    # Step 6: Collect all evidence artifacts
+    # Step 6: Collect all evidence
     logger.info("Step 6: Collecting evidence artifacts...")
-    all_evidence = []
-    all_evidence.extend(structuring_evidence)
-    all_evidence.extend(layering_evidence)
+    all_evidence = structuring_evidence + layering_evidence
     
-    # Save evidence separately
+    # Save evidence
     evidence_path = output_dir / "evidence_documents.json"
     with open(evidence_path, 'w') as f:
         json.dump(all_evidence, f, indent=2, default=str)
     logger.info(f"  - Evidence saved: {evidence_path}")
-    logger.info(f"  - Total evidence documents: {len(all_evidence)}")
     
     # Step 7: Save outputs
     logger.info("Step 7: Saving outputs...")
@@ -144,7 +189,7 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     layering_gt_path = output_dir / "layering_gt.json"
     save_ground_truth(layering_crime, layering_gt_path)
     
-    # Step 8: Prepare and save combined ground truth
+    # Step 8: Prepare combined ground truth
     logger.info("Step 8: Preparing combined ground truth...")
     ground_truth = {
         'crimes': [
@@ -169,37 +214,38 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     with open(ground_truth_path, 'w') as f:
         json.dump(ground_truth, f, indent=2, default=str)
     
-    # Step 9: Load into A2A interface (for serve mode)
+    # Step 9: Load into A2A interface
     logger.info("Step 9: Loading data into A2A interface...")
     set_graph(G)
     set_ground_truth(ground_truth)
     set_evidence(all_evidence)
     
     logger.info("=" * 60)
-    logger.info("ENHANCED generation complete!")
-    logger.info(f"  - Difficulty: {difficulty}/10")
+    logger.info("DATA GENERATION COMPLETE")
+    logger.info(f"  - Seed: {seed}")
+    logger.info(f"  - Difficulty: {difficulty}")
     logger.info(f"  - Graph: {graph_path}")
     logger.info(f"  - Ground truth: {ground_truth_path}")
     logger.info(f"  - Evidence documents: {len(all_evidence)}")
     logger.info(f"  - Total nodes: {G.number_of_nodes()}")
     logger.info(f"  - Total edges: {G.number_of_edges()}")
     logger.info("=" * 60)
+    
+    return True
 
 
-def start_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) -> None:
+def start_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     """
-    Start A2A interface server.
+    Start the A2A server.
     
     Args:
         host: Host to bind to
         port: Port to listen on
-        reload: Enable auto-reload for development
     """
     import uvicorn
     
     logger.info("=" * 60)
-    logger.info("Starting Green Financial Crime Agent A2A Server")
-    logger.info("=" * 60)
+    logger.info("STARTING A2A SERVER")
     logger.info(f"  - Host: {host}")
     logger.info(f"  - Port: {port}")
     logger.info(f"  - API Docs: http://{host}:{port}/docs")
@@ -210,139 +256,91 @@ def start_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) 
         "src.core.a2a_interface:app",
         host=host,
         port=port,
-        reload=reload,
         log_level="info"
     )
 
 
 def main():
-    """Main CLI entry point."""
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Green Financial Crime Agent - Synthetic AML Data Generator",
+        description="Initialize and start the Green Financial Crime Agent with deterministic configuration",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Generate synthetic data (default difficulty 5)
-    python main.py generate --output-dir ./outputs
+    # Start with default settings (seed=42, difficulty=5)
+    python scripts/init_server.py
     
-    # Generate easy crimes (difficulty 3)
-    python main.py generate --output-dir ./outputs/easy --difficulty 3
+    # Start with custom configuration
+    python scripts/init_server.py --seed 123 --difficulty 8 --port 9000
     
-    # Generate expert-level crimes (difficulty 10)
-    python main.py generate --output-dir ./outputs/expert --difficulty 10
-    
-    # Start A2A server (requires data to be generated first)
-    python main.py serve
-    
-    # Start server with custom port
-    python main.py serve --port 9000
-    
-    # Generate data and start server in one command (RECOMMENDED)
-    python main.py serve --generate-on-startup --seed 42 --difficulty 5
-    
-    # Generate expert-level data and serve
-    python main.py serve --generate-on-startup --difficulty 10
+    # Use environment variables
+    SEED=42 DIFFICULTY=5 PORT=8000 python scripts/init_server.py
         """
     )
     
-    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    # Get defaults from environment variables
+    default_seed = int(os.environ.get('SEED', 42))
+    default_difficulty = int(os.environ.get('DIFFICULTY', 5))
+    default_port = int(os.environ.get('PORT', 8000))
+    default_host = os.environ.get('HOST', '0.0.0.0')
     
-    # Generate command
-    gen_parser = subparsers.add_parser(
-        "generate",
-        help="Generate synthetic financial crime dataset"
-    )
-    gen_parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("./outputs"),
-        help="Output directory for generated files (default: ./outputs)"
-    )
-    gen_parser.add_argument(
-        "--seed",
+    parser.add_argument(
+        '--seed',
         type=int,
-        default=42,
-        help="Random seed for reproducibility (default: 42)"
+        default=default_seed,
+        help=f'Random seed for reproducibility (default: {default_seed})'
     )
-    gen_parser.add_argument(
-        "--difficulty",
+    parser.add_argument(
+        '--difficulty',
         type=int,
-        default=5,
+        default=default_difficulty,
         choices=range(1, 11),
-        metavar="1-10",
-        help="Crime detection difficulty (1=trivial, 10=expert, default: 5)"
+        metavar='1-10',
+        help=f'Crime detection difficulty (default: {default_difficulty})'
     )
-    
-    # Serve command
-    serve_parser = subparsers.add_parser(
-        "serve",
-        help="Start A2A interface server"
-    )
-    serve_parser.add_argument(
-        "--host",
+    parser.add_argument(
+        '--host',
         type=str,
-        default="0.0.0.0",
-        help="Host to bind to (default: 0.0.0.0)"
+        default=default_host,
+        help=f'Host to bind to (default: {default_host})'
     )
-    serve_parser.add_argument(
-        "--port",
+    parser.add_argument(
+        '--port',
         type=int,
-        default=8000,
-        help="Port to listen on (default: 8000)"
+        default=default_port,
+        help=f'Port to listen on (default: {default_port})'
     )
-    serve_parser.add_argument(
-        "--reload",
-        action="store_true",
-        help="Enable auto-reload for development"
-    )
-    serve_parser.add_argument(
-        "--generate-on-startup",
-        action="store_true",
-        help="Generate synthetic data before starting server"
-    )
-    serve_parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for data generation (default: 42, requires --generate-on-startup)"
-    )
-    serve_parser.add_argument(
-        "--difficulty",
-        type=int,
-        default=5,
-        choices=range(1, 11),
-        metavar="1-10",
-        help="Crime difficulty (default: 5, requires --generate-on-startup)"
-    )
-    serve_parser.add_argument(
-        "--output-dir",
+    parser.add_argument(
+        '--output-dir',
         type=Path,
-        default=Path("./outputs"),
-        help="Output directory for generated files (default: ./outputs)"
+        default=PROJECT_ROOT / "outputs",
+        help='Output directory for generated files'
+    )
+    parser.add_argument(
+        '--generate-only',
+        action='store_true',
+        help='Only generate data, do not start server'
     )
     
     args = parser.parse_args()
     
-    if args.command == "generate":
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        generate_synthetic_data(
-            args.output_dir, 
-            seed=args.seed,
-            difficulty=args.difficulty
-        )
-    elif args.command == "serve":
-        # Generate data on startup if requested
-        if args.generate_on_startup:
-            logger.info("Generating data on startup...")
-            args.output_dir.mkdir(parents=True, exist_ok=True)
-            generate_synthetic_data(
-                args.output_dir,
-                seed=args.seed,
-                difficulty=args.difficulty
-            )
-        start_server(host=args.host, port=args.port, reload=args.reload)
-    else:
-        parser.print_help()
+    # Set all seeds first
+    set_all_seeds(args.seed)
+    
+    # Generate and load data
+    success = generate_and_load_data(
+        output_dir=args.output_dir,
+        seed=args.seed,
+        difficulty=args.difficulty
+    )
+    
+    if not success:
+        logger.error("Data generation failed!")
+        sys.exit(1)
+    
+    # Start server unless generate-only
+    if not args.generate_only:
+        start_server(host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

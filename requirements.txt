@@ -10,7 +10,7 @@ networkx>=3.0                    # Scale-free graph generation and analysis
 # Synthetic Data Generation
 # =============================================================================
 faker>=18.0                      # Entity generation (names, companies, accounts)
-sdv>=1.0                         # Statistical Data Vault - correlation modeling
+sdv>=1.15.0                      # Statistical Data Vault - Gaussian Copula modeling
 
 # =============================================================================
 # API & Serialization

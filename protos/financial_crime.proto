@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package financial_crime;
+
+// Transaction message
+message Transaction {
+  string transaction_id = 1;
+  string source = 2;
+  string target = 3;
+  double amount = 4;
+  string currency = 5;
+  string timestamp = 6;  // ISO 8601 format
+  string transaction_type = 7;
+  string memo = 8;
+  string label = 9;  // "legitimate", "structuring", "layering"
+  double risk_score = 10;
+  bool is_international = 11;
+  string merchant_type = 12;
+}
+
+// KYC Profile message
+message KycProfile {
+  string account_id = 1;
+  string entity_type = 2;
+  string name = 3;
+  string company = 4;
+  string address = 5;
+  string country = 6;
+  string swift_code = 7;
+  string iban = 8;
+  double risk_score = 9;
+  string verification_status = 10;
+  string created_at = 11;
+  string last_activity = 12;
+}
+
+// Transaction List Response
+message TransactionListResponse {
+  string account_id = 1;
+  int32 transaction_count = 2;
+  repeated Transaction transactions = 3;
+}
+
+// Account Connection
+message AccountConnection {
+  string account_id = 1;
+  string relationship = 2;
+  int32 transaction_count = 3;
+  double total_amount = 4;
+}
+
+// Account Connections Response
+message AccountConnectionsResponse {
+  string account_id = 1;
+  int32 connection_count = 2;
+  repeated AccountConnection connections = 3;
+}
+
+// Investigation Assessment Request
+message InvestigationAssessmentRequest {
+  string participant_id = 1;
+  string investigation_data_json = 2;  // JSON-serialized dict
+}
+
+// Rubric Breakdown
+message RubricBreakdown {
+  double pattern_identification = 1;
+  double evidence_quality = 2;
+  double narrative_clarity = 3;
+  double completeness = 4;
+}
+
+// Investigation Assessment Response
+message InvestigationAssessmentResponse {
+  double score = 1;
+  string feedback = 2;
+  RubricBreakdown rubric_breakdown = 3;
+  repeated string missed_indicators = 4;
+  int32 tool_call_count = 5;  // Efficiency metric
+  double efficiency_score = 6;  // Normalized efficiency
+}
+
+// Graph Node for export
+message GraphNode {
+  string id = 1;
+  string entity_type = 2;
+  string name = 3;
+  string country = 4;
+  double risk_score = 5;
+  map<string, string> attributes = 6;  // CORRECTED: proper map syntax
+}
+
+// Graph Edge for export
+message GraphEdge {
+  string source = 1;
+  string target = 2;
+  double amount = 3;
+  string label = 4;
+  map<string, string> attributes = 5;  // CORRECTED: proper map syntax
+}
+
+// Full Financial Graph for serialization
+message FinancialGraph {
+  repeated GraphNode nodes = 1;
+  repeated GraphEdge edges = 2;
+  int32 node_count = 3;
+  int32 edge_count = 4;
+}
+
+// Evidence Document
+message EvidenceDocument {
+  string document_id = 1;
+  string document_type = 2;  // "SAR", "email", "receipt", etc.
+  string subject_id = 3;
+  string date = 4;  // ISO 8601 format
+  string content = 5;
+  map<string, string> metadata = 6;
+}
+
+// Evidence List Response
+message EvidenceListResponse {
+  int32 document_count = 1;
+  repeated EvidenceDocument documents = 2;
+}

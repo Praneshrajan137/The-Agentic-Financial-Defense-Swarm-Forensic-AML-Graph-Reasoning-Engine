@@ -18,13 +18,22 @@ Endpoints:
 - GET /agent.json - Agent manifest
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response as FastAPIResponse
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from enum import Enum
 import networkx as nx
 import uuid
+
+# Import protobuf module with fallback
+try:
+    from . import financial_crime_pb2 as pb2
+    PROTOBUF_AVAILABLE = True
+except ImportError:
+    PROTOBUF_AVAILABLE = False
+    pb2 = None
 
 
 # Enums
@@ -67,18 +76,43 @@ app = FastAPI(
 )
 
 
+# Middleware for tracking tool calls
+@app.middleware("http")
+async def track_tool_calls(request: Request, call_next):
+    """
+    Track tool usage for efficiency scoring.
+    
+    Every call to /a2a/tools/* increments the counter for the participant.
+    Participant ID is extracted from X-Participant-ID header.
+    """
+    # Extract participant_id from header
+    participant_id = request.headers.get("X-Participant-ID")
+    
+    # Call the endpoint
+    response = await call_next(request)
+    
+    # Increment counter if this was a tool call and we have a participant
+    if participant_id and request.url.path.startswith('/a2a/tools/'):
+        count = increment_tool_counter(participant_id)
+        # Add custom header showing current count
+        response.headers['X-Tool-Call-Count'] = str(count)
+    
+    return response
+
+
 # Request/Response Models
 class AgentManifest(BaseModel):
     """Agent manifest for A2A protocol discovery."""
     name: str = "green-financial-crime-agent"
     version: str = "1.0.0"
-    description: str = "Synthetic financial crime data generator"
+    description: str = "Synthetic financial crime data generator with evidence artifacts"
     capabilities: List[str] = [
         "generate_graph",
         "inject_structuring",
         "inject_layering",
         "get_transactions",
-        "get_kyc_profile"
+        "get_kyc_profile",
+        "get_evidence"  # NEW: Evidence retrieval for "Sherlock Holmes" mode
     ]
     endpoints: Dict[str, str] = {
         "health": "/health",
@@ -86,6 +120,7 @@ class AgentManifest(BaseModel):
         "transactions": "/a2a/tools/get_transactions",
         "kyc": "/a2a/tools/get_kyc_profile",
         "connections": "/a2a/tools/get_account_connections",
+        "evidence": "/a2a/tools/get_evidence",  # NEW: Evidence endpoint
         "assessment": "/a2a/investigation_assessment"
     }
 
@@ -122,11 +157,14 @@ class RubricBreakdown(BaseModel):
 
 
 class InvestigationAssessmentResponse(BaseModel):
-    """Response for investigation assessment."""
+    """Response for investigation assessment with efficiency metrics."""
     score: float = Field(ge=0, le=100)
     feedback: str
     rubric_breakdown: Optional[RubricBreakdown] = None
     missed_indicators: Optional[List[str]] = None
+    tool_call_count: int = 0  # Number of tool calls made
+    efficiency_score: float = 0.0  # Efficiency score (0-100)
+    efficiency_rank: str = "unknown"  # Rank: "excellent", "good", "fair", "poor"
 
 
 # Transaction Endpoints
@@ -202,10 +240,39 @@ class AccountConnectionsResponse(BaseModel):
     connections: List[AccountConnection]
 
 
+# Evidence Endpoints
+class GetEvidenceRequest(BaseModel):
+    """Request for evidence documents."""
+    entity_id: Optional[str] = None  # Filter by entity
+    document_type: Optional[str] = None  # Filter by type (SAR, email, etc.)
+    contains_keyword: Optional[str] = None  # Search in text
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class EvidenceDocument(BaseModel):
+    """Evidence document structure."""
+    document_id: str
+    document_type: str
+    subject_id: Optional[str] = None
+    date: datetime
+    content: str
+    metadata: Dict[str, Any] = {}
+
+
+class EvidenceListResponse(BaseModel):
+    """Response containing evidence documents."""
+    document_count: int
+    documents: List[EvidenceDocument]
+
+
 # Global state (will be managed by persistent state in production)
 _current_graph: Optional[nx.DiGraph] = None
 _injected_crimes: List[Dict[str, Any]] = []
 _ground_truth: Dict[str, Any] = {}
+_evidence_documents: List[Dict[str, Any]] = []
+
+# Tool call tracking for efficiency metrics
+_tool_call_counters: Dict[str, int] = {}
 
 
 def set_graph(graph: nx.DiGraph) -> None:
@@ -218,6 +285,48 @@ def set_ground_truth(truth: Dict[str, Any]) -> None:
     """Set the ground truth for assessment."""
     global _ground_truth
     _ground_truth = truth
+
+
+def set_evidence(evidence_list: List[Dict[str, Any]]) -> None:
+    """Set evidence documents for the API."""
+    global _evidence_documents
+    _evidence_documents = evidence_list
+
+
+def reset_tool_counter(participant_id: str) -> None:
+    """Reset tool call counter for a participant."""
+    global _tool_call_counters
+    _tool_call_counters[participant_id] = 0
+
+
+def increment_tool_counter(participant_id: str) -> int:
+    """
+    Increment and return tool call count for a participant.
+    
+    Args:
+        participant_id: Unique identifier for the participant
+        
+    Returns:
+        Updated tool call count
+    """
+    global _tool_call_counters
+    if participant_id not in _tool_call_counters:
+        _tool_call_counters[participant_id] = 0
+    _tool_call_counters[participant_id] += 1
+    return _tool_call_counters[participant_id]
+
+
+def get_tool_count(participant_id: str) -> int:
+    """
+    Get current tool call count for a participant.
+    
+    Args:
+        participant_id: Unique identifier for the participant
+        
+    Returns:
+        Current tool call count (0 if participant not found)
+    """
+    return _tool_call_counters.get(participant_id, 0)
 
 
 def _resolve_account_id(account_id: str) -> Any:
@@ -276,16 +385,17 @@ async def investigation_assessment(
     request: InvestigationAssessmentRequest
 ) -> InvestigationAssessmentResponse:
     """
-    Evaluate a participant's investigation and return scored assessment.
+    Evaluate a participant's investigation and return scored assessment with EFFICIENCY.
     
     This endpoint compares the participant's findings against ground truth
-    and provides detailed feedback.
+    and provides detailed feedback including efficiency metrics.
     
     The assessment evaluates:
-    - Pattern identification: How well did the participant identify crime patterns?
-    - Evidence quality: Quality and completeness of supporting evidence
-    - Narrative clarity: Clarity and structure of the investigation narrative
-    - Completeness: Coverage of all indicators in ground truth
+    - Pattern identification (28%): How well did the participant identify crime patterns?
+    - Evidence quality (20%): Quality and completeness of supporting evidence
+    - Narrative clarity (16%): Clarity and structure of the investigation narrative
+    - Completeness (16%): Coverage of all indicators in ground truth
+    - Efficiency (20%): How few tool calls were needed
     """
     if not _ground_truth:
         raise HTTPException(
@@ -306,27 +416,51 @@ async def investigation_assessment(
     narrative_score = _calculate_narrative_clarity(investigation_data)
     completeness_score = _calculate_completeness(investigation_data, _ground_truth)
     
-    # Calculate overall score (weighted average)
+    # Calculate efficiency score based on tool call count
+    tool_count = get_tool_count(request.participant_id)
+    
+    # Efficiency scoring:
+    # - Optimal: 10-50 calls = 100 points (excellent)
+    # - Good: 51-100 calls = 80 points (good)
+    # - Fair: 101-200 calls = 60 points (fair)
+    # - Poor: 200+ calls = decreasing score (poor)
+    if tool_count <= 50:
+        efficiency_score = 100.0
+        efficiency_rank = "excellent"
+    elif tool_count <= 100:
+        efficiency_score = 80.0
+        efficiency_rank = "good"
+    elif tool_count <= 200:
+        efficiency_score = 60.0
+        efficiency_rank = "fair"
+    else:
+        efficiency_score = max(40.0 - (tool_count - 200) * 0.1, 10.0)
+        efficiency_rank = "poor"
+    
+    # Calculate overall score with efficiency (weighted average)
     weights = {
-        'pattern': 0.35,
-        'evidence': 0.25,
-        'narrative': 0.20,
-        'completeness': 0.20
+        'pattern': 0.28,      # Reduced from 0.35
+        'evidence': 0.20,     # Reduced from 0.25
+        'narrative': 0.16,    # Reduced from 0.20
+        'completeness': 0.16, # Reduced from 0.20
+        'efficiency': 0.20    # NEW
     }
     
     total_score = (
         pattern_score * weights['pattern'] +
         evidence_score * weights['evidence'] +
         narrative_score * weights['narrative'] +
-        completeness_score * weights['completeness']
+        completeness_score * weights['completeness'] +
+        efficiency_score * weights['efficiency']
     )
     total_score = round(total_score, 2)
     
     # Find missed indicators
     missed = _find_missed_indicators(investigation_data, _ground_truth)
     
-    # Generate feedback
+    # Generate feedback with efficiency info
     feedback = _generate_feedback(total_score, missed)
+    feedback += f"\n\nEfficiency: {tool_count} tool calls ({efficiency_rank})"
     
     return InvestigationAssessmentResponse(
         score=total_score,
@@ -337,18 +471,26 @@ async def investigation_assessment(
             narrative_clarity=narrative_score,
             completeness=completeness_score
         ),
-        missed_indicators=missed
+        missed_indicators=missed,
+        tool_call_count=tool_count,
+        efficiency_score=efficiency_score,
+        efficiency_rank=efficiency_rank
     )
 
 
 # A2A Tool Endpoints
-@app.post("/a2a/tools/get_transactions", response_model=TransactionListResponse)
-async def get_transactions(request: GetTransactionsRequest) -> TransactionListResponse:
+@app.post("/a2a/tools/get_transactions", response_model=None)
+async def get_transactions(
+    request: GetTransactionsRequest,
+    http_request: Request
+):
     """
     Retrieve transaction history for an account.
     
     Returns all transactions where the account is either source or target,
     filtered by the specified parameters.
+    
+    Supports Protobuf serialization when Accept: application/x-protobuf header is set.
     """
     if _current_graph is None:
         raise HTTPException(
@@ -384,11 +526,42 @@ async def get_transactions(request: GetTransactionsRequest) -> TransactionListRe
     transactions.sort(key=lambda t: t.timestamp, reverse=True)
     transactions = transactions[:request.limit]
     
-    return TransactionListResponse(
+    response_model = TransactionListResponse(
         account_id=request.account_id,
         transaction_count=len(transactions),
         transactions=transactions
     )
+    
+    # Check if Protobuf requested
+    accept = http_request.headers.get("accept", "")
+    if "application/x-protobuf" in accept and PROTOBUF_AVAILABLE and pb2:
+        # Convert to Protobuf
+        proto_response = pb2.TransactionListResponse(
+            account_id=response_model.account_id,
+            transaction_count=response_model.transaction_count,
+            transactions=[
+                pb2.Transaction(
+                    transaction_id=txn.transaction_id,
+                    source=txn.source,
+                    target=txn.target,
+                    amount=txn.amount,
+                    currency=txn.currency,
+                    timestamp=txn.timestamp.isoformat(),
+                    transaction_type=txn.transaction_type.value,
+                    memo=txn.memo or ""
+                )
+                for txn in response_model.transactions
+            ]
+        )
+        
+        # Return binary response
+        return FastAPIResponse(
+            content=proto_response.SerializeToString(),
+            media_type="application/x-protobuf"
+        )
+    
+    # Return JSON (default)
+    return response_model
 
 
 @app.post("/a2a/tools/get_kyc_profile", response_model=KycProfileResponse)
@@ -493,6 +666,60 @@ async def get_account_connections(
         account_id=request.account_id,
         connection_count=len(connection_list),
         connections=connection_list
+    )
+
+
+@app.post("/a2a/tools/get_evidence", response_model=EvidenceListResponse)
+async def get_evidence(request: GetEvidenceRequest) -> EvidenceListResponse:
+    """
+    Retrieve evidence documents (SARs, emails, receipts).
+    
+    This is the "Sherlock Holmes" tool. The Purple Agent must:
+    1. Read the documents to find entity IDs
+    2. Extract the IDs
+    3. Query the graph with those IDs
+    
+    This forces cognitive reasoning, not just SQL queries.
+    """
+    matching_docs = []
+    
+    for doc in _evidence_documents:
+        # Filter by entity_id
+        if request.entity_id and doc.get('subject_id') != request.entity_id:
+            continue
+        
+        # Filter by document_type
+        if request.document_type and doc.get('document_type') != request.document_type:
+            continue
+        
+        # Search by keyword
+        if request.contains_keyword:
+            searchable_text = doc.get('body', '') + doc.get('narrative', '')
+            if request.contains_keyword.lower() not in searchable_text.lower():
+                continue
+        
+        # Build response document
+        try:
+            doc_date = datetime.fromisoformat(doc.get('date', datetime.now().isoformat()))
+        except (ValueError, TypeError):
+            doc_date = datetime.now()
+        
+        evidence_doc = EvidenceDocument(
+            document_id=f"doc_{len(matching_docs)}",
+            document_type=doc.get('document_type', 'unknown'),
+            subject_id=doc.get('subject_id'),
+            date=doc_date,
+            content=doc.get('body', doc.get('narrative', '')),
+            metadata={k: v for k, v in doc.items() if k not in ['body', 'narrative', 'date']}
+        )
+        matching_docs.append(evidence_doc)
+        
+        if len(matching_docs) >= request.limit:
+            break
+    
+    return EvidenceListResponse(
+        document_count=len(matching_docs),
+        documents=matching_docs
     )
 
 
@@ -794,7 +1021,16 @@ __all__ = [
     'KycProfileResponse',
     'GetAccountConnectionsRequest',
     'AccountConnectionsResponse',
+    'GetEvidenceRequest',
+    'EvidenceDocument',
+    'EvidenceListResponse',
     'set_graph',
     'set_ground_truth',
-    'create_agent_json'
+    'set_evidence',
+    'create_agent_json',
+    'PROTOBUF_AVAILABLE',
+    # Tool call tracking
+    'reset_tool_counter',
+    'increment_tool_counter',
+    'get_tool_count'
 ]

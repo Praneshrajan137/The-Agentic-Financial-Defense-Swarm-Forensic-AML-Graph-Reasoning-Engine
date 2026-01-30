@@ -22,26 +22,30 @@ import json
 import logging
 from faker import Faker
 
+from .evidence_generator import EvidenceGenerator
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class StructuringConfig:
-    """Configuration for structuring crime injection."""
+    """Configuration for structuring crime injection with difficulty."""
     num_sources: int = 20
     mule_node: Optional[int] = None
     min_amount: float = 9000.0
     max_amount: float = 9800.0
     time_window_hours: int = 48
+    difficulty: int = 5  # 1-10 scale: 1=trivial, 10=expert
 
 
 @dataclass
 class LayeringConfig:
-    """Configuration for layering crime injection."""
+    """Configuration for layering crime injection with difficulty."""
     chain_length: int = 5
     min_decay: float = 0.02
     max_decay: float = 0.05
     initial_amount: float = 100000.0
+    difficulty: int = 5  # 1-10 scale: 1=trivial, 10=expert
 
 
 @dataclass
@@ -56,20 +60,25 @@ class InjectedCrime:
 def inject_structuring(
     G: nx.DiGraph,
     config: Optional[StructuringConfig] = None,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    generate_evidence: bool = True
 ) -> Tuple[nx.DiGraph, InjectedCrime]:
     """
-    Inject structuring (smurfing) crime pattern into graph.
+    Inject structuring (smurfing) crime pattern with difficulty-based obfuscation.
     
     Pattern: Fan-in - multiple sources sending small amounts to single mule.
-    - 20 source nodes each send $9,000-$9,800 to 1 mule
-    - All transfers within 48-hour window
-    - Amounts stay below $10,000 CTR threshold
+    
+    Difficulty effects:
+    - 1-3 (Trivial): All within 4 hours, similar amounts ($9,500-$9,700)
+    - 4-6 (Medium): Spread over 48 hours, varied amounts ($9,000-$9,800)
+    - 7-8 (Hard): Spread over 1 week, wider amounts ($7,500-$9,800), decoy transactions
+    - 9-10 (Expert): Spread over 3 months, long gaps, mixed with legitimate activity
     
     Args:
         G: NetworkX DiGraph to inject crime into
         config: Structuring configuration parameters
         seed: Random seed for reproducibility
+        generate_evidence: Whether to generate SAR and email artifacts (default: True)
     
     Returns:
         Tuple of (modified graph, crime record)
@@ -82,6 +91,7 @@ def inject_structuring(
         Faker.seed(seed)
     
     fake = Faker()
+    difficulty = config.difficulty
     
     # Get the maximum node ID to create new unique nodes
     max_node = max(G.nodes()) if G.nodes() else 0
@@ -92,6 +102,34 @@ def inject_structuring(
     else:
         # Select a random existing node as the mule
         mule_id = random.choice(list(G.nodes()))
+    
+    # DIFFICULTY-BASED TIME SPREADING
+    if difficulty <= 3:
+        # Trivial: All within 4 hours
+        effective_time_window = 4
+    elif difficulty <= 6:
+        # Medium: Use configured window (48 hours default)
+        effective_time_window = config.time_window_hours
+    elif difficulty <= 8:
+        # Hard: Spread over 1 week
+        effective_time_window = 168  # 7 days
+    else:
+        # Expert: Spread over 3 months
+        effective_time_window = 2160  # 90 days
+    
+    # DIFFICULTY-BASED AMOUNT RANGES
+    if difficulty <= 3:
+        # Trivial: Very similar amounts (easy to spot)
+        min_amt = 9500.0
+        max_amt = 9700.0
+    elif difficulty <= 6:
+        # Medium: Standard variance
+        min_amt = config.min_amount
+        max_amt = config.max_amount
+    else:
+        # Hard/Expert: Wider range, harder to detect
+        min_amt = max(config.min_amount - 1500, 7500.0)
+        max_amt = config.max_amount
     
     # Create source nodes and edges
     source_nodes = []
@@ -115,12 +153,17 @@ def inject_structuring(
         )
         source_nodes.append(source_id)
         
-        # Generate amount below CTR threshold ($10,000)
-        amount = round(random.uniform(config.min_amount, config.max_amount), 2)
+        # Generate amount with difficulty-based variance
+        amount = round(random.uniform(min_amt, max_amt), 2)
         amounts.append(amount)
         
-        # Generate timestamp within time window
-        hours_offset = random.uniform(0, config.time_window_hours)
+        # Generate timestamp with difficulty-based spreading
+        hours_offset = random.uniform(0, effective_time_window)
+        
+        # Expert mode: Add random "quiet periods" (long gaps)
+        if difficulty >= 9 and i % 5 == 0:
+            hours_offset += random.uniform(100, 500)
+        
         timestamp = base_time + timedelta(hours=hours_offset)
         
         # Add edge from source to mule
@@ -136,6 +179,26 @@ def inject_structuring(
             memo=fake.sentence(nb_words=4)
         )
         edges_involved.append((source_id, mule_id))
+        
+        # EXPERT MODE: Add decoy legitimate transactions
+        if difficulty >= 8:
+            # Add 2-4 legitimate transactions per smurf
+            num_decoys = random.randint(2, 4)
+            existing_nodes = list(G.nodes())
+            for _ in range(num_decoys):
+                decoy_target = random.choice(existing_nodes)
+                if decoy_target != mule_id and decoy_target != source_id:
+                    G.add_edge(
+                        source_id,
+                        decoy_target,
+                        transaction_id=f"txn_{uuid.uuid4().hex[:8]}",
+                        amount=round(random.uniform(50, 500), 2),
+                        currency='USD',
+                        timestamp=timestamp + timedelta(hours=random.uniform(-24, 24)),
+                        transaction_type='ach',
+                        label='legitimate',
+                        memo=fake.sentence(nb_words=3)
+                    )
     
     # Create crime record
     crime = InjectedCrime(
@@ -147,9 +210,50 @@ def inject_structuring(
             'source_count': config.num_sources,
             'total_amount': round(sum(amounts), 2),
             'time_window_hours': config.time_window_hours,
-            'amounts': amounts
+            'effective_time_window_hours': effective_time_window,
+            'amounts': amounts,
+            'difficulty': difficulty,
+            'amount_range': [min_amt, max_amt]
         }
     )
+    
+    # Generate evidence artifacts
+    evidence_artifacts = []
+    
+    if generate_evidence:
+        evidence_gen = EvidenceGenerator(seed=seed)
+        
+        # Get mule name from graph
+        mule_name = G.nodes[mule_id].get('name', f'Entity {mule_id}')
+        
+        # Generate SAR narrative
+        sar = evidence_gen.generate_sar_narrative(
+            subject_id=str(mule_id),
+            subject_name=mule_name,
+            crime_type='structuring',
+            transaction_count=config.num_sources,
+            total_amount=round(sum(amounts), 2),
+            time_window_hours=config.time_window_hours
+        )
+        evidence_artifacts.append(sar)
+        
+        # Generate internal emails from branch managers (3 emails)
+        for i in range(min(3, len(source_nodes))):
+            source_id = source_nodes[i]
+            source_name = G.nodes[source_id].get('name', f'Smurf {i}')
+            
+            email = evidence_gen.generate_internal_email(
+                subject_id=str(source_id),
+                subject_name=source_name,
+                suspicious_behavior=f"Customer made a ${amounts[i]:,.2f} cash deposit and asked about CTR limits"
+            )
+            evidence_artifacts.append(email)
+        
+        logger.info(f"Generated {len(evidence_artifacts)} evidence artifacts for structuring crime")
+    
+    # Add evidence to crime metadata
+    crime.metadata['evidence_artifacts'] = evidence_artifacts
+    crime.metadata['evidence_count'] = len(evidence_artifacts)
     
     return G, crime
 
@@ -159,15 +263,19 @@ def inject_layering(
     config: Optional[LayeringConfig] = None,
     seed: Optional[int] = None,
     source_node: Optional[int] = None,
-    dest_node: Optional[int] = None
+    dest_node: Optional[int] = None,
+    generate_evidence: bool = True
 ) -> Tuple[nx.DiGraph, InjectedCrime]:
     """
-    Inject layering crime pattern into graph.
+    Inject layering crime pattern with difficulty-based obfuscation.
     
     Pattern: Chain transfers with decay to obscure money trail.
-    - Directed chain of transfers
-    - 2-5% decay per hop
-    - No cycles allowed
+    
+    Difficulty effects:
+    - 1-3 (Trivial): Short chain (3 hops), obvious decay (5%), rapid transfers
+    - 4-6 (Medium): Medium chain (5-7 hops), realistic decay (2-5%)
+    - 7-8 (Hard): Long chain (8-10 hops), varied decay, mixed with legitimate
+    - 9-10 (Expert): Very long chain (15+ hops), minimal decay (1-2%), long time gaps
     
     Args:
         G: NetworkX DiGraph to inject crime into
@@ -175,6 +283,7 @@ def inject_layering(
         seed: Random seed for reproducibility
         source_node: Optional starting node (uses random existing node if None)
         dest_node: Optional destination node (uses random existing node if None)
+        generate_evidence: Whether to generate SAR and email artifacts (default: True)
     
     Returns:
         Tuple of (modified graph, crime record)
@@ -187,6 +296,49 @@ def inject_layering(
         Faker.seed(seed)
     
     fake = Faker()
+    difficulty = config.difficulty
+    
+    # DIFFICULTY-BASED CHAIN LENGTH
+    if difficulty <= 3:
+        # Trivial: Short chain, easy to trace
+        effective_chain_length = 3
+    elif difficulty <= 6:
+        # Medium: Use configured length
+        effective_chain_length = config.chain_length
+    elif difficulty <= 8:
+        # Hard: Longer chain
+        effective_chain_length = random.randint(8, 10)
+    else:
+        # Expert: Very long chain
+        effective_chain_length = random.randint(15, 20)
+    
+    # DIFFICULTY-BASED DECAY RATES
+    if difficulty <= 3:
+        # Trivial: Obvious decay (easy to spot)
+        min_decay = 0.04
+        max_decay = 0.06
+    elif difficulty <= 6:
+        # Medium: Standard decay
+        min_decay = config.min_decay
+        max_decay = config.max_decay
+    else:
+        # Hard/Expert: Minimal decay (harder to detect)
+        min_decay = 0.01
+        max_decay = 0.02
+    
+    # DIFFICULTY-BASED TIME INTERVALS
+    if difficulty <= 3:
+        # Trivial: Very rapid (easy to spot velocity)
+        hop_interval_minutes = 15
+    elif difficulty <= 6:
+        # Medium: 30 minutes between hops
+        hop_interval_minutes = 30
+    elif difficulty <= 8:
+        # Hard: Hours between hops
+        hop_interval_minutes = random.randint(60, 240)
+    else:
+        # Expert: Days between hops
+        hop_interval_minutes = random.randint(720, 2880)  # 12-48 hours
     
     # Get the maximum node ID to create new unique nodes
     max_node = max(G.nodes()) if G.nodes() else 0
@@ -204,7 +356,7 @@ def inject_layering(
     chain_nodes = [source_node]
     
     # Create intermediate nodes
-    for i in range(config.chain_length):
+    for i in range(effective_chain_length):
         new_node = max_node + 1 + i
         
         # Add intermediate node (shell companies)
@@ -219,6 +371,24 @@ def inject_layering(
             verification_status='verified'
         )
         chain_nodes.append(new_node)
+        
+        # EXPERT MODE: Add decoy legitimate transactions
+        if difficulty >= 8:
+            num_decoys = random.randint(1, 3)
+            for _ in range(num_decoys):
+                decoy_target = random.choice(existing_nodes)
+                if decoy_target != new_node:
+                    G.add_edge(
+                        new_node,
+                        decoy_target,
+                        transaction_id=f"txn_{uuid.uuid4().hex[:8]}",
+                        amount=round(random.uniform(100, 5000), 2),
+                        currency='USD',
+                        timestamp=datetime.now() + timedelta(hours=random.uniform(-24, 24)),
+                        transaction_type='ach',
+                        label='legitimate',
+                        memo=fake.sentence(nb_words=3)
+                    )
     
     # Add destination to chain
     chain_nodes.append(dest_node)
@@ -229,14 +399,13 @@ def inject_layering(
     decays = []
     amount = config.initial_amount
     base_time = datetime.now()
-    hop_interval_minutes = 30  # Rapid hops within 24-hour window
     
     for i in range(len(chain_nodes) - 1):
         src = chain_nodes[i]
         tgt = chain_nodes[i + 1]
         
         # Apply decay
-        decay = random.uniform(config.min_decay, config.max_decay)
+        decay = random.uniform(min_decay, max_decay)
         decays.append(decay)
         
         if i > 0:  # Don't decay the first transfer
@@ -244,8 +413,13 @@ def inject_layering(
         
         amounts.append(round(amount, 2))
         
-        # Generate timestamp with rapid velocity
-        timestamp = base_time + timedelta(minutes=hop_interval_minutes * i)
+        # Generate timestamp with difficulty-based velocity
+        # Expert mode: Add occasional long gaps
+        interval = hop_interval_minutes
+        if difficulty >= 9 and i % 4 == 0:
+            interval += random.randint(1440, 4320)  # Add 1-3 days gap
+        
+        timestamp = base_time + timedelta(minutes=interval * i)
         
         # Add edge
         G.add_edge(
@@ -274,13 +448,53 @@ def inject_layering(
             'source_node': source_node,
             'dest_node': dest_node,
             'chain_length': config.chain_length,
+            'effective_chain_length': effective_chain_length,
             'initial_amount': config.initial_amount,
             'final_amount': round(amounts[-1], 2),
             'total_decay': round(1 - (amounts[-1] / config.initial_amount), 4),
             'amounts': amounts,
-            'decays': decays
+            'decays': decays,
+            'difficulty': difficulty,
+            'decay_range': [min_decay, max_decay]
         }
     )
+    
+    # Generate evidence artifacts
+    evidence_artifacts = []
+    
+    if generate_evidence:
+        evidence_gen = EvidenceGenerator(seed=seed)
+        
+        # Get source name from graph
+        source_name = G.nodes[source_node].get('name', f'Entity {source_node}')
+        
+        # Generate SAR narrative
+        sar = evidence_gen.generate_sar_narrative(
+            subject_id=str(source_node),
+            subject_name=source_name,
+            crime_type='layering',
+            transaction_count=len(chain_nodes) - 1,
+            total_amount=config.initial_amount,
+            time_window_hours=24
+        )
+        evidence_artifacts.append(sar)
+        
+        # Generate conflicting evidence (GOLD MEDAL FEATURE)
+        # This tests hallucination resistance
+        if len(chain_nodes) > 1:
+            first_amount = amounts[0] if amounts else config.initial_amount
+            conflicts = evidence_gen.generate_conflicting_evidence(
+                subject_id=str(chain_nodes[1]),  # First intermediate node
+                actual_amount=first_amount,
+                graph_amount=first_amount  # They match, but email is wrong
+            )
+            evidence_artifacts.extend(conflicts)
+        
+        logger.info(f"Generated {len(evidence_artifacts)} evidence artifacts for layering crime")
+    
+    # Add evidence to crime metadata
+    crime.metadata['evidence_artifacts'] = evidence_artifacts
+    crime.metadata['evidence_count'] = len(evidence_artifacts)
     
     return G, crime
 

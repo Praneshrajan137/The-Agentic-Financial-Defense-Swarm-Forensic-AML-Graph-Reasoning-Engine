@@ -1,0 +1,63 @@
+[scenario]
+name = "financial_crime_investigation"
+description = "Synthetic Financial Crime Detection Benchmark - The Panopticon Protocol"
+version = "1.0.0"
+difficulty_levels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+default_difficulty = 5
+
+[assessment]
+name = "financial_crime_investigation"
+metrics = ["precision", "recall", "f1", "efficiency", "narrative_quality"]
+
+[assessment.scoring_weights]
+pattern_identification = 0.28
+evidence_quality = 0.20
+narrative_clarity = 0.16
+completeness = 0.16
+efficiency = 0.20
+
+[assessment.config]
+difficulty = 5
+include_conflicting_evidence = true
+
+[agents]
+[agents.judge]
+image = "financial-crime-green"
+port = 8000
+description = "Green Agent - Synthetic Crime Generator (The God of Chaos)"
+capabilities = [
+    "generate_graph",
+    "inject_structuring",
+    "inject_layering",
+    "get_transactions",
+    "get_kyc_profile",
+    "get_evidence",
+    "investigation_assessment"
+]
+
+[agents.investigator]
+image = "financial-crime-purple-baseline"
+port = 8001
+description = "Baseline Purple Agent - Simple Heuristic Investigator"
+
+[configuration]
+graph_size = 1000
+transaction_count = 10000
+crime_types = ["structuring", "layering"]
+evidence_generation = true
+protobuf_support = true
+
+[features]
+sherlock_holmes_upgrade = true
+efficiency_metrics = true
+dynamic_difficulty = true
+conflicting_evidence = true
+needle_in_haystack = false
+
+[judging_criteria]
+technical_correctness = "Proper A2A protocol, valid graph topology"
+benchmark_design_quality = "Requires cognitive reasoning, not just SQL queries"
+evaluation_methodology = "Efficiency metrics, precision/recall, narrative scoring"
+innovation = "Dynamic difficulty, conflicting evidence, evidence generation"
+documentation = "Clear README, setup instructions, API documentation"
+reproducibility = "Seeded generation, deterministic outputs"
