@@ -14,11 +14,25 @@ ghcr.io/praneshrajan137/green-financial-crime-agent:latest
 
 ---
 
-## One-Time: Publish the Image to GitHub Container Registry
+## Publish the Image to GitHub Container Registry
 
-Before submitting, push the Green Agent image so AgentBeats can pull it.
+**Recommended: GitHub Actions (no terminal or PAT needed)**
 
-**Quick way (after Docker is running and you've logged in once):**
+The image is built and pushed automatically by GitHub Actions:
+
+1. **Push this repo** (or run the workflow manually):  
+   **GitHub → Your repo → Actions → "Publish Green Agent to GHCR" → Run workflow**
+2. After the workflow completes, the image will be at `ghcr.io/praneshrajan137/green-financial-crime-agent:latest`
+3. **Make the package public** (one-time):  
+   **GitHub → Your profile → Packages → green-financial-crime-agent → Package settings → Change visibility → Public**
+
+Then use `ghcr.io/praneshrajan137/green-financial-crime-agent:latest` in the AgentBeats form.
+
+---
+
+**Alternative: Publish from your machine (optional)**
+
+If you prefer to build and push locally:
 
 ```powershell
 # From repo root, Windows:
@@ -30,7 +44,7 @@ Before submitting, push the Green Agent image so AgentBeats can pull it.
 ./scripts/publish-green-agent.sh
 ```
 
-### 1. Log in to GitHub Container Registry (one-time)
+### Log in to GitHub Container Registry (one-time, only if publishing locally)
 
 ```bash
 # Create a Personal Access Token (PAT) at:
