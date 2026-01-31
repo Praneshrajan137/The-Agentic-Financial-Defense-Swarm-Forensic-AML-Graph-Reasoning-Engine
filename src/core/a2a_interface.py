@@ -534,13 +534,19 @@ async def get_transactions(
     
     # Check if Protobuf requested
     accept = http_request.headers.get("accept", "")
-    if "application/x-protobuf" in accept and PROTOBUF_AVAILABLE and pb2:
+    if (
+        "application/x-protobuf" in accept 
+        and PROTOBUF_AVAILABLE 
+        and pb2 is not None
+        and hasattr(pb2, "TransactionListResponse")
+        and hasattr(pb2, "Transaction")
+    ):
         # Convert to Protobuf
-        proto_response = pb2.TransactionListResponse(
+        proto_response = pb2.TransactionListResponse(  # type: ignore[attr-defined]
             account_id=response_model.account_id,
             transaction_count=response_model.transaction_count,
             transactions=[
-                pb2.Transaction(
+                pb2.Transaction(  # type: ignore[attr-defined]
                     transaction_id=txn.transaction_id,
                     source=txn.source,
                     target=txn.target,
