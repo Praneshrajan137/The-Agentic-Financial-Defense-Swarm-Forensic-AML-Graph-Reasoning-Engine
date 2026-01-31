@@ -229,7 +229,7 @@ def add_transaction_attributes(
     if use_sdv and SDV_AVAILABLE and num_edges > 0:
         return _add_transaction_attributes_sdv(G, num_edges, base_time, seed)
     else:
-        return _add_transaction_attributes_random(G, base_time)
+        return _add_transaction_attributes_random(G, base_time, seed)
 
 
 def _add_transaction_attributes_sdv(
@@ -251,14 +251,16 @@ def _add_transaction_attributes_sdv(
     
     # Generate synthetic transaction data in batch with seed for reproducibility
     logger.info(f"Generating {num_edges} synthetic transactions via SDV Gaussian Copula...")
-    # CRITICAL: Set seed BEFORE sampling for reproducibility
-    if seed is not None:
-        np.random.seed(seed)
-        random.seed(seed)
-    synthetic_tx = synthesizer.sample(num_rows=num_edges)
+    # CRITICAL: Pass seed directly to SDV's sample() method for reproducibility
+    # SDV has its own internal RNG that ignores global np.random.seed()
+    synthetic_tx = synthesizer.sample(num_rows=num_edges, seed=seed)
     
     # Convert to list of dicts for iteration
     tx_data = synthetic_tx.to_dict('records')
+    
+    # Create seeded RNG for reproducible transaction IDs and timestamps
+    # uuid.uuid4() is never deterministic, so we use seeded random instead
+    rng = random.Random(seed)
     
     # Assign to edges
     edge_idx = 0
@@ -266,14 +268,15 @@ def _add_transaction_attributes_sdv(
         for u, v, key in G.edges(keys=True):
             tx = tx_data[edge_idx]
             
-            G.edges[u, v, key]['transaction_id'] = f"txn_{uuid.uuid4().hex[:8]}"
+            # Use seeded random hex instead of uuid.uuid4() for reproducibility
+            G.edges[u, v, key]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
             # Clamp amount to valid range [100, 50000]
             amount = max(100.0, min(float(tx['amount']), 50000.0))
             G.edges[u, v, key]['amount'] = amount
             G.edges[u, v, key]['risk_score'] = float(tx['risk_score'])
             G.edges[u, v, key]['is_international'] = bool(tx['is_international'])
             G.edges[u, v, key]['currency'] = 'USD'
-            G.edges[u, v, key]['timestamp'] = base_time - timedelta(days=random.randint(0, 365))
+            G.edges[u, v, key]['timestamp'] = base_time - timedelta(days=rng.randint(0, 365))
             G.edges[u, v, key]['transaction_type'] = str(tx['transaction_type'])
             G.edges[u, v, key]['label'] = 'legitimate'
             G.edges[u, v, key]['memo'] = None
@@ -283,14 +286,15 @@ def _add_transaction_attributes_sdv(
         for u, v in G.edges():
             tx = tx_data[edge_idx]
             
-            G.edges[u, v]['transaction_id'] = f"txn_{uuid.uuid4().hex[:8]}"
+            # Use seeded random hex instead of uuid.uuid4() for reproducibility
+            G.edges[u, v]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
             # Clamp amount to valid range [100, 50000]
             amount = max(100.0, min(float(tx['amount']), 50000.0))
             G.edges[u, v]['amount'] = amount
             G.edges[u, v]['risk_score'] = float(tx['risk_score'])
             G.edges[u, v]['is_international'] = bool(tx['is_international'])
             G.edges[u, v]['currency'] = 'USD'
-            G.edges[u, v]['timestamp'] = base_time - timedelta(days=random.randint(0, 365))
+            G.edges[u, v]['timestamp'] = base_time - timedelta(days=rng.randint(0, 365))
             G.edges[u, v]['transaction_type'] = str(tx['transaction_type'])
             G.edges[u, v]['label'] = 'legitimate'
             G.edges[u, v]['memo'] = None
@@ -303,34 +307,43 @@ def _add_transaction_attributes_sdv(
 
 def _add_transaction_attributes_random(
     G: nx.DiGraph,
-    base_time: datetime
+    base_time: datetime,
+    seed: Optional[int] = None
 ) -> nx.DiGraph:
     """
     Add transaction attributes using random generation (fallback method).
     
     This is the original implementation used when SDV is not available.
+    
+    Args:
+        G: NetworkX graph
+        base_time: Base timestamp for transactions
+        seed: Random seed for reproducibility
     """
     transaction_types = ['wire', 'ach', 'cash', 'internal']
     
     logger.info("Using random fallback for transaction attributes (SDV not available)")
     
+    # Create seeded RNG for reproducibility
+    rng = random.Random(seed)
+    
     # Handle both DiGraph and MultiDiGraph
     if isinstance(G, nx.MultiDiGraph):
         for u, v, key in G.edges(keys=True):
-            G.edges[u, v, key]['transaction_id'] = f"txn_{uuid.uuid4().hex[:8]}"
-            G.edges[u, v, key]['amount'] = round(random.uniform(100, 50000), 2)
+            G.edges[u, v, key]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
+            G.edges[u, v, key]['amount'] = round(rng.uniform(100, 50000), 2)
             G.edges[u, v, key]['currency'] = 'USD'
-            G.edges[u, v, key]['timestamp'] = base_time - timedelta(days=random.randint(0, 365))
-            G.edges[u, v, key]['transaction_type'] = random.choice(transaction_types)
+            G.edges[u, v, key]['timestamp'] = base_time - timedelta(days=rng.randint(0, 365))
+            G.edges[u, v, key]['transaction_type'] = rng.choice(transaction_types)
             G.edges[u, v, key]['label'] = 'legitimate'
             G.edges[u, v, key]['memo'] = None
     else:
         for u, v in G.edges():
-            G.edges[u, v]['transaction_id'] = f"txn_{uuid.uuid4().hex[:8]}"
-            G.edges[u, v]['amount'] = round(random.uniform(100, 50000), 2)
+            G.edges[u, v]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
+            G.edges[u, v]['amount'] = round(rng.uniform(100, 50000), 2)
             G.edges[u, v]['currency'] = 'USD'
-            G.edges[u, v]['timestamp'] = base_time - timedelta(days=random.randint(0, 365))
-            G.edges[u, v]['transaction_type'] = random.choice(transaction_types)
+            G.edges[u, v]['timestamp'] = base_time - timedelta(days=rng.randint(0, 365))
+            G.edges[u, v]['transaction_type'] = rng.choice(transaction_types)
             G.edges[u, v]['label'] = 'legitimate'
             G.edges[u, v]['memo'] = None
     
