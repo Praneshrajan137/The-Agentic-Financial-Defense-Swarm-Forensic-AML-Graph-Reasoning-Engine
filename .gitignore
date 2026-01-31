@@ -54,3 +54,11 @@ results/
 
 # Cursor
 .cursor/
+
+# Project specific development artifacts (not needed for submission)
+.gemini/
+.claude/
+.mypy_cache/
+prd.json
+progress.txt
+prompt.md

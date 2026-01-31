@@ -18,7 +18,7 @@ services:
   # GREEN AGENT - The Judge (Server)
   # ==========================================================================
   green-agent:
-    image: ghcr.io/praneshrajan137/green-financial-crime-agent:latest
+    image: praneshrajan15/green-financial-crime-agent:latest
     build:
       context: .
       dockerfile: Dockerfile

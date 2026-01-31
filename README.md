@@ -44,8 +44,8 @@ The benchmark supports 10 difficulty levels, from trivial (4-hour time windows, 
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/financial-crime-benchmark.git
-cd financial-crime-benchmark
+git clone https://github.com/Praneshrajan137/The-Agentic-Financial-Defense-Swarm-Forensic-AML-Graph-Reasoning-Engine.git
+cd The-Agentic-Financial-Defense-Swarm-Forensic-AML-Graph-Reasoning-Engine
 
 # Build and run both agents
 docker-compose up --build
@@ -429,7 +429,7 @@ If you use this benchmark in your research, please cite:
 @software{panopticon_protocol,
   title = {The Panopticon Protocol: A Synthetic Financial Crime Investigation Benchmark},
   year = {2026},
-  url = {https://github.com/YOUR_USERNAME/financial-crime-benchmark}
+  url = {https://github.com/Praneshrajan137/The-Agentic-Financial-Defense-Swarm-Forensic-AML-Graph-Reasoning-Engine}
 }
 ```
 
