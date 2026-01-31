@@ -11,11 +11,12 @@ Technical Specification:
 """
 
 import networkx as nx
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Callable, Any
 import random
 import uuid
 import pickle
 import logging
+from pathlib import Path
 from datetime import datetime, timedelta
 from faker import Faker
 import numpy as np
@@ -31,7 +32,7 @@ try:
     logger.info("SDV successfully imported for correlated data generation")
 except ImportError as e:
     SDV_AVAILABLE = False
-    get_transaction_synthesizer = None
+    get_transaction_synthesizer: Optional[Callable[[bool], Any]] = None
     logger.warning(f"SDV not available, using random fallback: {e}")
 
 
@@ -226,7 +227,7 @@ def add_transaction_attributes(
     
     # Use SDV if available and requested
     if use_sdv and SDV_AVAILABLE and num_edges > 0:
-        return _add_transaction_attributes_sdv(G, num_edges, base_time)
+        return _add_transaction_attributes_sdv(G, num_edges, base_time, seed)
     else:
         return _add_transaction_attributes_random(G, base_time)
 
@@ -234,7 +235,8 @@ def add_transaction_attributes(
 def _add_transaction_attributes_sdv(
     G: nx.DiGraph,
     num_edges: int,
-    base_time: datetime
+    base_time: datetime,
+    seed: Optional[int] = None
 ) -> nx.DiGraph:
     """
     Add transaction attributes using SDV Gaussian Copula synthesizer.
@@ -247,9 +249,15 @@ def _add_transaction_attributes_sdv(
     # Get the trained synthesizer
     synthesizer = get_transaction_synthesizer()
     
-    # Generate synthetic transaction data in batch
+    # Generate synthetic transaction data in batch with seed for reproducibility
     logger.info(f"Generating {num_edges} synthetic transactions via SDV Gaussian Copula...")
-    synthetic_tx = synthesizer.sample(num_rows=num_edges)
+    # Pass seed to sample() for reproducible results
+    if seed is not None:
+        synthetic_tx = synthesizer.sample(num_rows=num_edges, output_file_path=None)
+        # SDV uses numpy random state internally, so ensure it's seeded
+        np.random.seed(seed)
+    else:
+        synthetic_tx = synthesizer.sample(num_rows=num_edges)
     
     # Convert to list of dicts for iteration
     tx_data = synthetic_tx.to_dict('records')
@@ -261,7 +269,9 @@ def _add_transaction_attributes_sdv(
             tx = tx_data[edge_idx]
             
             G.edges[u, v, key]['transaction_id'] = f"txn_{uuid.uuid4().hex[:8]}"
-            G.edges[u, v, key]['amount'] = float(tx['amount'])
+            # Clamp amount to valid range [100, 50000]
+            amount = max(100.0, min(float(tx['amount']), 50000.0))
+            G.edges[u, v, key]['amount'] = amount
             G.edges[u, v, key]['risk_score'] = float(tx['risk_score'])
             G.edges[u, v, key]['is_international'] = bool(tx['is_international'])
             G.edges[u, v, key]['currency'] = 'USD'
@@ -276,7 +286,9 @@ def _add_transaction_attributes_sdv(
             tx = tx_data[edge_idx]
             
             G.edges[u, v]['transaction_id'] = f"txn_{uuid.uuid4().hex[:8]}"
-            G.edges[u, v]['amount'] = float(tx['amount'])
+            # Clamp amount to valid range [100, 50000]
+            amount = max(100.0, min(float(tx['amount']), 50000.0))
+            G.edges[u, v]['amount'] = amount
             G.edges[u, v]['risk_score'] = float(tx['risk_score'])
             G.edges[u, v]['is_international'] = bool(tx['is_international'])
             G.edges[u, v]['currency'] = 'USD'

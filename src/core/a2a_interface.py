@@ -681,7 +681,7 @@ async def get_evidence(request: GetEvidenceRequest) -> EvidenceListResponse:
     
     This forces cognitive reasoning, not just SQL queries.
     """
-    matching_docs = []
+    matching_docs: List[EvidenceDocument] = []
     
     for doc in _evidence_documents:
         # Filter by entity_id
