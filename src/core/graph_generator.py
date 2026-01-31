@@ -32,7 +32,7 @@ try:
     logger.info("SDV successfully imported for correlated data generation")
 except ImportError as e:
     SDV_AVAILABLE = False
-    get_transaction_synthesizer: Optional[Callable[[bool], Any]] = None
+    get_transaction_synthesizer = None  # type: ignore[assignment,no-redef]
     logger.warning(f"SDV not available, using random fallback: {e}")
 
 
@@ -251,13 +251,11 @@ def _add_transaction_attributes_sdv(
     
     # Generate synthetic transaction data in batch with seed for reproducibility
     logger.info(f"Generating {num_edges} synthetic transactions via SDV Gaussian Copula...")
-    # Pass seed to sample() for reproducible results
+    # CRITICAL: Set seed BEFORE sampling for reproducibility
     if seed is not None:
-        synthetic_tx = synthesizer.sample(num_rows=num_edges, output_file_path=None)
-        # SDV uses numpy random state internally, so ensure it's seeded
         np.random.seed(seed)
-    else:
-        synthetic_tx = synthesizer.sample(num_rows=num_edges)
+        random.seed(seed)
+    synthetic_tx = synthesizer.sample(num_rows=num_edges)
     
     # Convert to list of dicts for iteration
     tx_data = synthetic_tx.to_dict('records')

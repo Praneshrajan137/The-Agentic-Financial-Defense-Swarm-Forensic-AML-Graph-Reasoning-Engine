@@ -33,7 +33,7 @@ try:
     PROTOBUF_AVAILABLE = True
 except ImportError:
     PROTOBUF_AVAILABLE = False
-    pb2 = None
+    pb2 = None  # type: ignore[assignment]
 
 
 # Enums
