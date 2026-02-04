@@ -245,29 +245,46 @@ def _add_transaction_attributes_sdv(
     - Amount correlates with risk_score
     - International transactions have higher amounts
     - Transaction types follow realistic distributions
+    
+    Reproducibility Strategy:
+    SDV doesn't support seed parameter in sample(). We use an oversample-and-shuffle
+    approach: generate a larger pool of samples, then use the seed to deterministically
+    shuffle and select rows. This ensures different seeds produce different but 
+    reproducible outputs.
     """
     # Get the trained synthesizer
     synthesizer = get_transaction_synthesizer()
     
-    # Generate synthetic transaction data in batch with seed for reproducibility
+    # Generate synthetic transaction data in batch
     logger.info(f"Generating {num_edges} synthetic transactions via SDV Gaussian Copula...")
     
-    # CRITICAL: SDV uses reset_sampling() for reproducibility, not seed parameter
-    # reset_sampling() resets the internal RNG state to when the synthesizer was fitted
-    # Combined with global seeds before fitting, this ensures reproducibility
-    if seed is not None:
-        random.seed(seed)
-        np.random.seed(seed)
-        synthesizer.reset_sampling()
+    # CRITICAL: Oversample-and-shuffle approach for seed-based differentiation
+    # SDV's reset_sampling() resets to a fixed state, so we:
+    # 1. Reset to get deterministic base samples
+    # 2. Sample MORE rows than needed (2x or minimum 1000)
+    # 3. Use seed to shuffle and select the rows we need
+    # This ensures different seeds produce different outputs
     
-    synthetic_tx = synthesizer.sample(num_rows=num_edges)
+    synthesizer.reset_sampling()
+    
+    # Oversample: generate more rows than needed for variety
+    oversample_size = max(num_edges * 2, min(1000, num_edges * 3))
+    synthetic_pool = synthesizer.sample(num_rows=oversample_size)
+    
+    # Use seed to deterministically shuffle and select
+    rng = random.Random(seed)
+    np_rng = np.random.RandomState(seed)
+    
+    # Shuffle the pool using the seed
+    indices = list(range(len(synthetic_pool)))
+    rng.shuffle(indices)
+    
+    # Select the first num_edges rows from shuffled indices
+    selected_indices = indices[:num_edges]
+    synthetic_tx = synthetic_pool.iloc[selected_indices].reset_index(drop=True)
     
     # Convert to list of dicts for iteration
     tx_data = synthetic_tx.to_dict('records')
-    
-    # Create seeded RNG for reproducible transaction IDs and timestamps
-    # uuid.uuid4() is never deterministic, so we use seeded random instead
-    rng = random.Random(seed)
     
     # Assign to edges
     edge_idx = 0
