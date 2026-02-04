@@ -251,9 +251,16 @@ def _add_transaction_attributes_sdv(
     
     # Generate synthetic transaction data in batch with seed for reproducibility
     logger.info(f"Generating {num_edges} synthetic transactions via SDV Gaussian Copula...")
-    # CRITICAL: Pass seed directly to SDV's sample() method for reproducibility
-    # SDV has its own internal RNG that ignores global np.random.seed()
-    synthetic_tx = synthesizer.sample(num_rows=num_edges, seed=seed)
+    
+    # CRITICAL: SDV uses reset_sampling() for reproducibility, not seed parameter
+    # reset_sampling() resets the internal RNG state to when the synthesizer was fitted
+    # Combined with global seeds before fitting, this ensures reproducibility
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+        synthesizer.reset_sampling()
+    
+    synthetic_tx = synthesizer.sample(num_rows=num_edges)
     
     # Convert to list of dicts for iteration
     tx_data = synthetic_tx.to_dict('records')
