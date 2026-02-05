@@ -1,10 +1,21 @@
 # Financial Crime Investigation Benchmark - Docker Compose
-# The Panopticon Protocol
+# The Panopticon Protocol Section 4.2.2 - Sidecar Pattern
+#
+# Architecture:
+#   green_agent_app (Python FastAPI on 0.0.0.0:5000) - INTERNAL ONLY
+#   green_agent_envoy (Envoy proxy on 0.0.0.0:8000) - EXTERNAL
+#   ratelimit_service (Redis-backed rate limiter)
+#   redis (Backend for rate limit service)
+#   purple_agent (Baseline investigator)
+#
+# CRITICAL: green_agent_app binds to 0.0.0.0:5000 but is NOT exposed externally
+#           Envoy proxies external :8000 -> internal green_agent_app:5000
 #
 # Usage:
-#   cd scenarios/financial_crime/
-#   docker-compose up --build              # Build and run
-#   docker-compose run purple_agent        # Run Purple Agent separately
+#   cd scenarios/financial_crime
+#   docker-compose up --build              # Build and start all services
+#   docker-compose up -d                   # Start in detached mode
+#   docker-compose run purple_agent        # Run Purple Agent investigation
 #
 # Environment Variables:
 #   SEED: Random seed (default: 42)
@@ -13,59 +24,106 @@
 version: '3.8'
 
 services:
-  # Green Agent - The Judge (Server)
-  green_agent:
+  # ====================================================================
+  # GREEN AGENT: Python Application (INTERNAL ONLY - via Envoy)
+  # ====================================================================
+  green_agent_app:
     build:
       context: ../..
-      dockerfile: Dockerfile
-    container_name: financial-crime-green
-    ports:
-      - "8000:8000"
-    volumes:
-      - ../../outputs:/mnt/user-data/outputs
+      dockerfile: scenarios/financial_crime/green_agent/Dockerfile
+    container_name: green-agent-app
+    # CRITICAL: Only expose to Docker network, NOT to host
+    expose:
+      - "5000"
+    networks:
+      - agent_network
     environment:
       - SEED=${SEED:-42}
       - DIFFICULTY=${DIFFICULTY:-5}
+      - GENERATE_EVIDENCE=true
       - PYTHONUNBUFFERED=1
-    # Generate data and start server in one process (data stays in memory)
-    command: >
-      python main.py serve
-      --host 0.0.0.0
-      --port 8000
-      --generate-on-startup
-      --seed ${SEED:-42}
-      --difficulty ${DIFFICULTY:-5}
-      --output-dir /mnt/user-data/outputs
+      - PORT=5000
+    volumes:
+      - ./green_agent/outputs:/app/outputs
+      - ./green_agent/data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # Use curl (installed in Dockerfile) for reliable health checks
+      test: [ "CMD", "curl", "-sf", "http://localhost:5000/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
-    networks:
-      - benchmark-network
+      start_period: 45s
+    # CRITICAL: Bind to 0.0.0.0 for container networking (NOT 127.0.0.1)
+    command: >
+      python main.py serve --host 0.0.0.0 --port 5000 --generate-on-startup --seed ${SEED:-42} --difficulty ${DIFFICULTY:-5} --output-dir /app/outputs
 
-  # Purple Agent - Baseline Investigator (Client)
+  # ====================================================================
+  # ENVOY SIDECAR: Production Networking Layer (EXTERNAL)
+  # ====================================================================
+  green_agent_envoy:
+    image: envoyproxy/envoy:v1.28-latest
+    container_name: green-agent-envoy
+    ports:
+      - "8000:8000" # External traffic
+      - "9901:9901" # Admin interface
+    networks:
+      - agent_network
+    volumes:
+      - ./green_agent/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    depends_on:
+      green_agent_app:
+        condition: service_healthy
+    command: [ "/usr/local/bin/envoy", "-c", "/etc/envoy/envoy.yaml", "--service-cluster", "green-agent" ]
+    # NOTE: Envoy distroless image lacks wget/curl for health checks
+    # We rely on depends_on service_healthy for green_agent_app instead
+    restart: unless-stopped
+
+  # ====================================================================
+  # REDIS: Backend for rate limit service
+  # ====================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: green-agent-redis
+    networks:
+      - agent_network
+    expose:
+      - "6379"
+    command: [ "redis-server", "--appendonly", "yes" ]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ====================================================================
+  # PURPLE AGENT: Baseline Investigator
+  # ====================================================================
   purple_agent:
     build:
       context: ../../purple_agent
       dockerfile: Dockerfile
-    container_name: financial-crime-purple-baseline
+    container_name: purple-agent-baseline
+    networks:
+      - agent_network
     depends_on:
-      green_agent:
+      green_agent_app:
         condition: service_healthy
+      green_agent_envoy:
+        condition: service_started
     environment:
-      - GREEN_AGENT_URL=http://green_agent:8000
+      - GREEN_AGENT_URL=http://green_agent_envoy:8000
       - PARTICIPANT_ID=${PARTICIPANT_ID:-baseline_purple_agent}
       - PYTHONUNBUFFERED=1
-    command: >
-      --green-url http://green_agent:8000
-      --participant-id ${PARTICIPANT_ID:-baseline_purple_agent}
-      --nodes 0 42 100
-    networks:
-      - benchmark-network
+    command: [ "--green-url", "http://green_agent_envoy:8000", "--participant-id", "${PARTICIPANT_ID:-baseline_purple_agent}", "--nodes", "0", "42", "100", "250" ]
     restart: "no"
 
 networks:
-  benchmark-network:
+  agent_network:
     driver: bridge
+    # Use unique network name to avoid conflicts with root docker-compose
+    name: panopticon-sidecar-network
+
+volumes:
+  redis_data:

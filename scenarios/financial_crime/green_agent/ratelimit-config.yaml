@@ -1,0 +1,28 @@
+# Rate Limit Configuration
+# The Panopticon Protocol Section 4.2.2
+# Limits: 100 requests/second per remote IP address
+
+domain: green_agent_ratelimit
+descriptors:
+  - key: remote_address
+    rate_limit:
+      unit: second
+      requests_per_unit: 100
+  
+  # Stricter limits for transaction endpoints
+  - key: header_match
+    value: get_transactions
+    descriptors:
+      - key: remote_address
+        rate_limit:
+          unit: second
+          requests_per_unit: 50
+  
+  # Stricter limits for assessment endpoint
+  - key: header_match
+    value: investigation_assessment
+    descriptors:
+      - key: remote_address
+        rate_limit:
+          unit: second
+          requests_per_unit: 20

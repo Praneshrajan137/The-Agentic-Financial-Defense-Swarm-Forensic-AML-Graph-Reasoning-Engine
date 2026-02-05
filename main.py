@@ -186,13 +186,13 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     logger.info("=" * 60)
 
 
-def start_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) -> None:
+def start_server(host: str = "127.0.0.1", port: int = 5000, reload: bool = False) -> None:
     """
     Start A2A interface server.
     
     Args:
-        host: Host to bind to
-        port: Port to listen on
+        host: Host to bind to (default: 127.0.0.1 for sidecar proxy)
+        port: Port to listen on (default: 5000, proxied by sidecar on 8000)
         reload: Enable auto-reload for development
     """
     import uvicorn
@@ -200,8 +200,8 @@ def start_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) 
     logger.info("=" * 60)
     logger.info("Starting Green Financial Crime Agent A2A Server")
     logger.info("=" * 60)
-    logger.info(f"  - Host: {host}")
-    logger.info(f"  - Port: {port}")
+    logger.info(f"  - Internal Address: {host}:{port}")
+    logger.info(f"  - External Access: Via Sidecar Proxy on :8000")
     logger.info(f"  - API Docs: http://{host}:{port}/docs")
     logger.info(f"  - Agent Manifest: http://{host}:{port}/agent.json")
     logger.info("=" * 60)
@@ -281,14 +281,14 @@ Examples:
     serve_parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
-        help="Host to bind to (default: 0.0.0.0)"
+        default="127.0.0.1",
+        help="Host to bind to (default: 127.0.0.1 for sidecar proxy)"
     )
     serve_parser.add_argument(
         "--port",
         type=int,
-        default=8000,
-        help="Port to listen on (default: 8000)"
+        default=5000,
+        help="Port to bind to (default: 5000, proxied by sidecar on 8000)"
     )
     serve_parser.add_argument(
         "--reload",

@@ -1,0 +1,37 @@
+# scenarios/financial_crime/green_agent/sidecar/Cargo.toml
+
+[package]
+name = "green-agent-sidecar"
+version = "1.0.0"
+edition = "2021"
+authors = ["Panopticon Protocol Team"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# HTTP server and client
+axum = "0.7"
+hyper = { version = "1.0", features = ["full"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Rate limiting
+governor = "0.6"
+
+# Circuit breaker
+failsafe = "1.2"
+
+# Tracing and logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
