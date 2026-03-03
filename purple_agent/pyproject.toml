@@ -1,0 +1,41 @@
+# ═══════════════════════════════════════════════════════════════════
+# Purple Agent -- Project Configuration v7.0
+# ═══════════════════════════════════════════════════════════════════
+
+[project]
+name = "purple-agent"
+version = "7.0.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]
+# -p no:randomly: DEFENSIVE -- if pytest-randomly is ever installed
+# (even transitively), it would randomize test order and break determinism.
+# This disables it preemptively. Harmless warning if plugin absent.
+addopts = "-p no:randomly --strict-markers --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning:langgraph.*",
+    "ignore::DeprecationWarning:langchain_core.*",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "protos/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+
+# WHY: The pythonpath = ["."] setting eliminates the need for sys.path hacks
+# or editable installs. `from src.config import ...` works in both pytest and runtime.
+# The asyncio_mode = "auto" removes the need for @pytest.mark.asyncio decorators.

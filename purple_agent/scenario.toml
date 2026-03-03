@@ -1,0 +1,23 @@
+[scenario]
+name = "financial_crime"
+description = "Autonomous Financial Crime Detection -- The Panopticon Protocol v7.0"
+
+[scenario.agents.green_agent]
+role = "data_generator"
+description = "God of Chaos -- generates synthetic financial ecosystems with embedded crime"
+port = 9090
+
+[scenario.agents.purple_agent]
+role = "investigator"
+description = "The Hunter -- forensic graph reasoning + SAR generation"
+port = 8080
+dockerfile = "Dockerfile"
+health_check = "/health"
+
+[scenario.evaluation]
+entity_recall_target = 1.0
+typology_accuracy_target = 1.0
+hallucination_tolerance = 0
+sar_format = "five_ws"
+jurisdictions = ["fincen", "fiu_ind"]
+confidence_threshold = 0.5

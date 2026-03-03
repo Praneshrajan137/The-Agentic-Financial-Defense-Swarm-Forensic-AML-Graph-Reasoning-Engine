@@ -1,0 +1,82 @@
+// ═══════════════════════════════════════════════════════════════════
+// Purple Agent -- A2A Protocol Schema v7.0
+// 7 message types for bidirectional Protobuf communication
+// NOTE: This proto is SHARED with Green Agent (Phase 1, complete).
+// The 'double amount' field is FROZEN -- cannot change to string.
+// Python code MUST convert via Decimal(str(proto_tx.amount)) at boundary.
+// ═══════════════════════════════════════════════════════════════════
+
+syntax = "proto3";
+package financial_crime;
+
+// --- Core Data Types ---
+
+message Transaction {
+    string id = 1;
+    string source_node = 2;
+    string target_node = 3;
+    double amount = 4;              // FROZEN: Convert to Decimal(str(amount)) in Python
+    string currency = 5;
+    int64 timestamp = 6;
+    string type = 7;                // "WIRE", "ACH", "CASH_DEPOSIT", "RTGS", "NEFT"
+    string reference = 8;
+    string branch_code = 9;
+}
+
+message NodeAttributes {
+    string id = 1;
+    string name = 2;
+    string entity_type = 3;         // "individual", "business", "bank", "government"
+    string jurisdiction = 4;        // ISO country code: "US", "IN", "DE"
+    string account_id = 5;
+    string ifsc_code = 6;
+    string pan_number = 7;
+    string address = 8;
+    string risk_rating = 9;         // "low", "medium", "high", "pep"
+    string swift_code = 10;
+}
+
+message TextEvidence {
+    string id = 1;
+    string source_type = 2;         // "email", "memo", "sar_draft", "teller_note"
+    string content = 3;
+    string associated_entity = 4;
+    int64 timestamp = 5;
+}
+
+// --- A2A Request/Response ---
+
+message GraphFragment {
+    string scenario_id = 1;
+    int64 generated_at = 2;
+    repeated Transaction transactions = 3;
+    map<string, NodeAttributes> nodes = 4;
+    repeated TextEvidence text_evidence = 5;
+    repeated string ground_truth_criminals = 6;  // For evaluation only
+}
+
+message InvestigationRequest {
+    string subject_id = 1;
+    int64 alert_timestamp = 2;
+    string case_id = 3;
+    int32 hop_depth = 4;            // Flows into DFS max_depth
+    string jurisdiction = 5;        // "fincen" or "fiu_ind"
+}
+
+message CitedEvidence {
+    string transaction_id = 1;
+    double amount = 2;
+    string relevance = 3;
+    int64 timestamp = 4;
+}
+
+message InvestigationResult {
+    string case_id = 1;
+    string sar_narrative = 2;
+    string typology_detected = 3;   // "STRUCTURING", "LAYERING", "BOTH", "NONE"
+    repeated string involved_entities = 4;
+    repeated CitedEvidence cited_evidence = 5;
+    double confidence_score = 6;    // Computed, not defaulted
+    string jurisdiction = 7;
+    int64 investigation_timestamp = 8;  // Set at submit time
+}

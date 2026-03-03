@@ -1,0 +1,39 @@
+{
+    "name": "Project_Gamma_Purple_Hunter",
+    "version": "7.0.0",
+    "description": "An autonomous forensic investigator agent capable of graph traversal, multi-modal evidence synthesis, and FinCEN/FIU-IND compliant SAR drafting with zero hallucination tolerance, confidence-gated SAR filing, and idempotent submission.",
+    "capabilities": [
+        "financial_crime_detection",
+        "sar_generation",
+        "graph_traversal",
+        "evidence_synthesis"
+    ],
+    "communication": {
+        "protocol": "a2a",
+        "endpoint": "http://purple-agent:8080/a2a",
+        "content_types": ["protobuf", "json"],
+        "health_check": "/health"
+    },
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "case_id": {"type": "string", "description": "Unique case identifier"},
+            "graph_entry_point": {"type": "string", "description": "Subject node ID to investigate"},
+            "hop_depth": {"type": "integer", "description": "Maximum traversal depth", "default": 4},
+            "jurisdiction": {"type": "string", "enum": ["fincen", "fiu_ind"], "default": "fincen"}
+        },
+        "required": ["case_id", "graph_entry_point"]
+    },
+    "output_schema": {
+        "type": "object",
+        "fields": [
+            {"name": "sar_narrative", "type": "string", "description": "Five Ws SAR narrative"},
+            {"name": "typology_detected", "type": "string", "enum": ["STRUCTURING", "LAYERING", "BOTH", "NONE"]},
+            {"name": "involved_entities", "type": "array", "description": "Criminal node IDs (sorted)"},
+            {"name": "confidence_score", "type": "number", "minimum": 0, "maximum": 1},
+            {"name": "jurisdiction", "type": "string", "enum": ["fincen", "fiu_ind"]},
+            {"name": "idempotency_key", "type": "string", "description": "SHA-256 dedup key"}
+        ],
+        "required": ["sar_narrative", "typology_detected", "involved_entities", "confidence_score"]
+    }
+}
