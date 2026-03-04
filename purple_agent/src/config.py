@@ -132,6 +132,14 @@ SAR_LLM_SEED = int(os.getenv("SAR_LLM_SEED", "42"))
 SAR_MAX_NARRATIVE_CHARS = int(os.getenv("SAR_MAX_NARRATIVE_CHARS", "10000"))
 
 # ═══════════════════════════════════════════════════════════════════
+# SAR GENERATION — v8.0 ADDITIONS (required by C1: SAR Drafter)
+# ═══════════════════════════════════════════════════════════════════
+# Max transactions to include in LLM prompt. Caps prompt length to
+# prevent context window overflow. 50 covers the structuring scenario
+# (20 TXs) and layering (4 TXs) with headroom for mixed scenarios.
+MAX_PROMPT_TRANSACTIONS = int(os.getenv("MAX_PROMPT_TRANSACTIONS", "50"))
+
+# ═══════════════════════════════════════════════════════════════════
 # EVIDENCE SYNTHESIS
 # ═══════════════════════════════════════════════════════════════════
 # Discrepancy threshold: if |text_amount - ledger_amount| > this,
@@ -168,11 +176,21 @@ AMOUNT_PATTERNS: dict[str, str] = {
     "inr_crore": r"(\d+(?:\.\d+)?)\s*crore",
 }
 
-# Pre-compiled regex for hot-path performance
+# Pre-compiled regex for hot-path performance (full-string VALIDATION mode)
 IFSC_COMPILED = re.compile(IFSC_REGEX)
 PAN_COMPILED = re.compile(PAN_REGEX)
 SWIFT_COMPILED = re.compile(SWIFT_REGEX)
 IBAN_COMPILED = re.compile(IBAN_REGEX)
+
+# v8.0 [P4v8-01]: SEARCH-mode compiled patterns for finditer() within text.
+# The _COMPILED patterns above use ^$ anchors (validation mode) which require
+# the ENTIRE input string to match — they return zero results when used with
+# .finditer() on prose text. These _SEARCH_COMPILED variants use \b word
+# boundaries to locate identifiers embedded in longer strings.
+IFSC_SEARCH_COMPILED = re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b")
+PAN_SEARCH_COMPILED = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b")
+SWIFT_SEARCH_COMPILED = re.compile(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b")
+IBAN_SEARCH_COMPILED = re.compile(r"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4,}\b")
 
 # ═══════════════════════════════════════════════════════════════════
 # RALPH WIGGUM LOOP
