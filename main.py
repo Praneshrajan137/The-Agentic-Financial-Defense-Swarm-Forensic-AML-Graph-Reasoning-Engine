@@ -60,12 +60,8 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     logger.info("Step 1: Generating scale-free baseline economy...")
     G = generate_scale_free_graph(n_nodes=1000, seed=seed)
     
-    # Convert MultiDiGraph to DiGraph if needed (scale_free_graph returns MultiDiGraph)
-    if isinstance(G, nx.MultiDiGraph):
-        G = nx.DiGraph(G)
-        logger.info("  - Converted MultiDiGraph to DiGraph")
-    
     logger.info(f"  - Generated {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+    logger.info(f"  - Graph type: {type(G).__name__}")
     
     # Step 2: Add entity attributes
     logger.info("Step 2: Adding locale-aligned entity attributes...")
@@ -186,13 +182,13 @@ def generate_synthetic_data(output_dir: Path, seed: int = 42, difficulty: int = 
     logger.info("=" * 60)
 
 
-def start_server(host: str = "127.0.0.1", port: int = 5000, reload: bool = False) -> None:
+def start_server(host: str = "0.0.0.0", port: int = 9090, reload: bool = False) -> None:
     """
     Start A2A interface server.
     
     Args:
-        host: Host to bind to (default: 127.0.0.1 for sidecar proxy)
-        port: Port to listen on (default: 5000, proxied by sidecar on 8000)
+        host: Host to bind to (default: 0.0.0.0)
+        port: Port to listen on (default: 9090, matching Purple Agent's GREEN_AGENT_URL)
         reload: Enable auto-reload for development
     """
     import uvicorn
@@ -200,10 +196,11 @@ def start_server(host: str = "127.0.0.1", port: int = 5000, reload: bool = False
     logger.info("=" * 60)
     logger.info("Starting Green Financial Crime Agent A2A Server")
     logger.info("=" * 60)
-    logger.info(f"  - Internal Address: {host}:{port}")
-    logger.info(f"  - External Access: Via Sidecar Proxy on :8000")
+    logger.info(f"  - Address: {host}:{port}")
     logger.info(f"  - API Docs: http://{host}:{port}/docs")
     logger.info(f"  - Agent Manifest: http://{host}:{port}/agent.json")
+    logger.info(f"  - A2A Endpoint: http://{host}:{port}/a2a")
+    logger.info(f"  - Results Endpoint: http://{host}:{port}/results")
     logger.info("=" * 60)
     
     uvicorn.run(
@@ -281,14 +278,14 @@ Examples:
     serve_parser.add_argument(
         "--host",
         type=str,
-        default="127.0.0.1",
-        help="Host to bind to (default: 127.0.0.1 for sidecar proxy)"
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)"
     )
     serve_parser.add_argument(
         "--port",
         type=int,
-        default=5000,
-        help="Port to bind to (default: 5000, proxied by sidecar on 8000)"
+        default=9090,
+        help="Port to listen on (default: 9090, matching Purple Agent's GREEN_AGENT_URL)"
     )
     serve_parser.add_argument(
         "--reload",

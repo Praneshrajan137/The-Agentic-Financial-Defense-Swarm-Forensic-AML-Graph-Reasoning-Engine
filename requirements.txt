@@ -1,47 +1,39 @@
-# Green Financial Crime Agent - Dependencies
+# Green Financial Crime Agent v7.0 - Pinned Dependencies
 # The Panopticon Protocol: Zero-Failure Synthetic Financial Crime Simulator
+# ALL versions are pinned for reproducible builds (no >= ranges).
 
 # =============================================================================
 # Core Graph Processing
 # =============================================================================
-networkx>=3.0                    # Scale-free graph generation and analysis
+networkx==3.6.1
 
 # =============================================================================
 # Synthetic Data Generation
 # =============================================================================
-faker>=18.0                      # Entity generation (names, companies, accounts)
-sdv>=1.15.0                      # Statistical Data Vault - Gaussian Copula modeling
+faker==40.1.2
+# sdv is optional -- heavy dependency, falls back to random generation
+# sdv==1.15.0
 
 # =============================================================================
 # API & Serialization
 # =============================================================================
-fastapi>=0.100                   # A2A Protocol HTTP interface
-uvicorn>=0.23                    # ASGI server for FastAPI
-pydantic>=2.0                    # Data validation
-protobuf>=4.0                    # Binary serialization (80% size reduction)
-httpx>=0.24                      # Async HTTP client for testing
+fastapi==0.128.0
+uvicorn==0.40.0
+pydantic==2.12.5
+protobuf==6.33.4
+httpx==0.28.1
+grpcio-tools==1.76.0
 
 # =============================================================================
 # Testing
 # =============================================================================
-pytest>=7.0                      # Test framework
-pytest-cov>=4.0                  # Coverage reporting (target: 90%+)
-pytest-asyncio>=0.21             # Async test support
+pytest==9.0.2
+pytest-cov==7.0.0
+pytest-asyncio==1.3.0
 
 # =============================================================================
 # Development & Quality
 # =============================================================================
-black>=23.0                      # Code formatting
-ruff>=0.1.0                      # Fast linting
-mypy>=1.5                        # Type checking
-
-# =============================================================================
-# Performance & Profiling
-# =============================================================================
-memory-profiler>=0.60            # Memory usage tracking (<2GB requirement)
-
-# =============================================================================
-# Optional: Visualization (for debugging)
-# =============================================================================
-# matplotlib>=3.7                # Graph visualization
-# seaborn>=0.12                  # Statistical plots
+black==26.1.0
+ruff==0.14.14
+mypy==1.19.1

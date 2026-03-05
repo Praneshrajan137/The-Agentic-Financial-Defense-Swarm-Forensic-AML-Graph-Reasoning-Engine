@@ -1,22 +1,17 @@
-# Green Financial Crime Agent
+# Green Financial Crime Agent v7.0
 # The Panopticon Protocol: Zero-Failure Synthetic Financial Crime Simulator
 #
 # Build: docker build -t green-financial-crime-agent .
-# Run (Standalone): docker run -p 8000:8000 green-financial-crime-agent
-# Run (Sidecar):    docker run -p 8000:5000 green-financial-crime-agent
+# Run:   docker run -p 9090:9090 green-financial-crime-agent
 #
-# NOTE: TCMalloc (google-perftools) is used for high-performance memory management
-# per The Panopticon Protocol Section 4.2.1
+# Purple Agent connects to this server at http://localhost:9090/a2a
 
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # ============================================================================
-# STAGE 1: HIGH-PERFORMANCE MEMORY MANAGEMENT (TCMalloc)
+# STAGE 1: SYSTEM DEPENDENCIES + TCMalloc
 # ============================================================================
 
-# Install TCMalloc (google-perftools) for thread-caching memory allocation
-# This prevents lock contention in multi-threaded graph operations
-# Also install curl for health checks (more reliable than Python's requests)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     curl \
@@ -25,14 +20,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtcmalloc-minimal4 \
     && rm -rf /var/lib/apt/lists/*
 
-# CRITICAL: Inject TCMalloc via LD_PRELOAD
-# This must be set BEFORE any Python code runs
-ENV LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4"
+# TCMalloc: configure LD_PRELOAD so the allocator is actually used at runtime.
+# We prefer the canonical x86_64 path but fall back to auto-detection on other archs.
+RUN TCMALLOC_PATH_DEFAULT="/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4" && \
+    if [ -f "$TCMALLOC_PATH_DEFAULT" ]; then \
+        echo "Using TCMalloc at $TCMALLOC_PATH_DEFAULT"; \
+        echo "LD_PRELOAD=$TCMALLOC_PATH_DEFAULT" >> /etc/environment; \
+    else \
+        TCMALLOC_PATH_DETECTED=$(find /usr/lib -name "libtcmalloc_minimal.so*" -type f | head -1 || true); \
+        if [ -n "$TCMALLOC_PATH_DETECTED" ]; then \
+            echo "Using detected TCMalloc at $TCMALLOC_PATH_DETECTED"; \
+            echo "LD_PRELOAD=$TCMALLOC_PATH_DETECTED" >> /etc/environment; \
+        else \
+            echo "WARNING: TCMalloc not found, proceeding without it"; \
+        fi; \
+    fi
 
-# Verify TCMalloc is loaded (for debugging)
-RUN echo "TCMalloc library path: $LD_PRELOAD" && \
-    ls -la /usr/lib/x86_64-linux-gnu/libtcmalloc* && \
-    echo "✅ TCMalloc successfully installed"
+# Export LD_PRELOAD into the container runtime environment if the library exists.
+ENV LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4"
 
 # ============================================================================
 # STAGE 2: PYTHON DEPENDENCIES
@@ -40,55 +45,38 @@ RUN echo "TCMalloc library path: $LD_PRELOAD" && \
 
 WORKDIR /app
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=0 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Copy requirements first for layer caching
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ============================================================================
 # STAGE 3: APPLICATION CODE
 # ============================================================================
 
-# Copy application code
 COPY . .
-
-# Create output directories
 RUN mkdir -p /mnt/user-data/outputs /app/outputs /app/data
 
 # ============================================================================
 # STAGE 4: HEALTH & RUNTIME CONFIGURATION
 # ============================================================================
 
-# Expose both ports for flexibility:
-# - 5000: Internal port for sidecar proxy architecture
-# - 8000: External port for standalone mode
-EXPOSE 5000 8000
+EXPOSE 9090
 
-# Health check endpoint using curl (more reliable than Python's requests with TCMalloc)
-# Uses ${PORT:-5000} to adapt to the port the server is actually listening on
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-5000}/health || exit 1
+    CMD curl -f http://localhost:9090/health || exit 1
 
-# Environment variables
-ENV GRAPH_SIZE=1000
-ENV DIFFICULTY=5
-ENV GENERATE_EVIDENCE=true
-# Default port for health check (can be overridden)
-ENV PORT=5000
+ENV GRAPH_SIZE=1000 \
+    DIFFICULTY=5 \
+    GENERATE_EVIDENCE=true \
+    A2A_SERVER_PORT=9090
 
 # ============================================================================
-# STAGE 5: STARTUP COMMAND
+# STAGE 5: STARTUP
 # ============================================================================
 
-# Default command: Start FastAPI on 0.0.0.0:5000
-# This allows both standalone and sidecar proxy architectures:
-# - Standalone: docker run -p 8000:5000 ... OR override with --host 0.0.0.0 --port 8000
-# - Sidecar: Envoy proxies external :8000 to internal :5000
-CMD ["python", "main.py", "serve", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["python", "main.py", "serve", "--generate-on-startup", "--host", "0.0.0.0", "--port", "9090"]

@@ -4,28 +4,35 @@ Agent2Agent Interface Module
 Exposes synthetic financial crime data via A2A protocol.
 
 Protocol Specification:
-- HTTP/JSON-RPC endpoints following /a2a/tools/ pattern
-- agent.json manifest file
-- Incremental data exposure
-- Protobuf serialization support
-
-Endpoints:
-- POST /a2a/investigation_assessment - Investigation simulation
-- POST /a2a/tools/get_transactions - Transaction history
-- POST /a2a/tools/get_kyc_profile - KYC profile lookup
-- POST /a2a/tools/get_account_connections - Network connections
-- GET /health - Health check
-- GET /agent.json - Agent manifest
+- POST /a2a -- A2A protocol endpoint (InvestigationRequest -> GraphFragment)
+- POST /results -- Investigation result submission
+- POST /a2a/tools/* -- Incremental data exposure tools
+- GET /health -- Health check
+- GET /agent.json -- Agent manifest
 """
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response as FastAPIResponse
+from fastapi.responses import Response as FastAPIResponse, JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
+from collections import deque
 from enum import Enum
 import networkx as nx
 import uuid
+import time
+import logging
+
+from src.config import (
+    AGENT_VERSION,
+    A2A_SERVER_PORT,
+    PROTOBUF_CONTENT_TYPE,
+    DEFAULT_HOP_DEPTH,
+    MAX_FRAGMENT_TRANSACTIONS,
+    MAX_FRAGMENT_NODES,
+)
+
+logger = logging.getLogger(__name__)
 
 # Import protobuf module with fallback
 try:
@@ -72,7 +79,7 @@ class ConnectionRelationship(str, Enum):
 app = FastAPI(
     title="Green Financial Crime Agent",
     description="A2A Protocol interface for synthetic AML data",
-    version="1.0.0"
+    version=AGENT_VERSION,
 )
 
 
@@ -104,7 +111,7 @@ async def track_tool_calls(request: Request, call_next):
 class AgentManifest(BaseModel):
     """Agent manifest for A2A protocol discovery."""
     name: str = "green-financial-crime-agent"
-    version: str = "1.0.0"
+    version: str = AGENT_VERSION
     description: str = "Synthetic financial crime data generator with evidence artifacts"
     capabilities: List[str] = [
         "generate_graph",
@@ -112,23 +119,27 @@ class AgentManifest(BaseModel):
         "inject_layering",
         "get_transactions",
         "get_kyc_profile",
-        "get_evidence"  # NEW: Evidence retrieval for "Sherlock Holmes" mode
+        "get_evidence",
+        "a2a_graph_fragment",
+        "investigation_results",
     ]
     endpoints: Dict[str, str] = {
         "health": "/health",
         "manifest": "/agent.json",
+        "a2a": "/a2a",
+        "results": "/results",
         "transactions": "/a2a/tools/get_transactions",
         "kyc": "/a2a/tools/get_kyc_profile",
         "connections": "/a2a/tools/get_account_connections",
-        "evidence": "/a2a/tools/get_evidence",  # NEW: Evidence endpoint
-        "assessment": "/a2a/investigation_assessment"
+        "evidence": "/a2a/tools/get_evidence",
+        "assessment": "/a2a/investigation_assessment",
     }
 
 
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str = "healthy"
-    version: str = "1.0.0"
+    version: str = AGENT_VERSION
     graph_loaded: bool = False
     node_count: int = 0
     edge_count: int = 0
@@ -266,16 +277,19 @@ class EvidenceListResponse(BaseModel):
 
 
 # Global state (will be managed by persistent state in production)
-_current_graph: Optional[nx.DiGraph] = None
+_current_graph: Optional[Union[nx.DiGraph, nx.MultiDiGraph]] = None
 _injected_crimes: List[Dict[str, Any]] = []
 _ground_truth: Dict[str, Any] = {}
 _evidence_documents: List[Dict[str, Any]] = []
+
+# Investigation results storage (keyed by idempotency key)
+_investigation_results: Dict[str, Dict[str, Any]] = {}
 
 # Tool call tracking for efficiency metrics
 _tool_call_counters: Dict[str, int] = {}
 
 
-def set_graph(graph: nx.DiGraph) -> None:
+def set_graph(graph: Union[nx.DiGraph, nx.MultiDiGraph]) -> None:
     """Set the current graph for the API."""
     global _current_graph
     _current_graph = graph
@@ -366,7 +380,7 @@ async def health_check() -> HealthResponse:
     """Health check endpoint."""
     return HealthResponse(
         status="healthy",
-        version="1.0.0",
+        version=AGENT_VERSION,
         graph_loaded=_current_graph is not None,
         node_count=_current_graph.number_of_nodes() if _current_graph else 0,
         edge_count=_current_graph.number_of_edges() if _current_graph else 0
@@ -377,6 +391,317 @@ async def health_check() -> HealthResponse:
 async def get_manifest() -> AgentManifest:
     """Return agent manifest for A2A discovery."""
     return AgentManifest()
+
+
+# =============================================================================
+# A2A Protocol Endpoints (Purple Agent contract)
+# =============================================================================
+
+def _datetime_to_epoch(dt: Any) -> int:
+    """Convert datetime to Unix epoch seconds (int64).
+
+    Handles datetime objects, ISO strings, and passthrough for ints.
+    Returns 0 for unconvertible values (defensive, logged upstream).
+    """
+    if isinstance(dt, int):
+        return dt
+    if isinstance(dt, float):
+        return int(dt)
+    if isinstance(dt, datetime):
+        return int(dt.timestamp())
+    if isinstance(dt, str):
+        try:
+            return int(datetime.fromisoformat(dt).timestamp())
+        except (ValueError, TypeError):
+            return 0
+    return 0
+
+
+def _bfs_subgraph(
+    graph: nx.DiGraph,
+    subject_id: Any,
+    hop_depth: int,
+) -> set:
+    """BFS traversal from subject_id up to hop_depth hops.
+
+    Returns the set of node IDs reachable within hop_depth.
+    Operates on both DiGraph and MultiDiGraph.
+    """
+    visited: set = set()
+    queue: deque = deque()
+    queue.append((subject_id, 0))
+    visited.add(subject_id)
+
+    while queue:
+        node, depth = queue.popleft()
+        if depth >= hop_depth:
+            continue
+        for neighbor in set(graph.successors(node)) | set(graph.predecessors(node)):
+            if neighbor not in visited and len(visited) < MAX_FRAGMENT_NODES:
+                visited.add(neighbor)
+                queue.append((neighbor, depth + 1))
+
+    return visited
+
+
+def _build_graph_fragment(
+    graph: nx.DiGraph,
+    subject_id: Any,
+    hop_depth: int,
+) -> Any:
+    """Assemble a protobuf GraphFragment from the in-memory graph.
+
+    Performs BFS from subject_id, collects all transactions and nodes
+    within hop_depth, converts to Purple's protobuf schema.
+    """
+    if pb2 is None:
+        raise HTTPException(status_code=500, detail="Protobuf module not available")
+
+    reachable_nodes = _bfs_subgraph(graph, subject_id, hop_depth)
+
+    proto_transactions = []
+    tx_count = 0
+
+    edge_iter = (
+        graph.edges(keys=True, data=True)
+        if isinstance(graph, nx.MultiDiGraph)
+        else ((u, v, None, d) for u, v, d in graph.edges(data=True))
+    )
+
+    for edge_tuple in edge_iter:
+        if isinstance(graph, nx.MultiDiGraph):
+            u, v, _key, data = edge_tuple
+        else:
+            u, v, _key, data = edge_tuple
+
+        if u not in reachable_nodes and v not in reachable_nodes:
+            continue
+        if tx_count >= MAX_FRAGMENT_TRANSACTIONS:
+            break
+
+        tx_id = data.get("transaction_id", f"txn_{u}_{v}")
+        amount = float(data.get("amount", 0.0))
+        currency = data.get("currency", "USD")
+        ts = _datetime_to_epoch(data.get("timestamp", 0))
+        tx_type = str(data.get("transaction_type", "WIRE")).upper()
+        reference = str(data.get("reference", ""))
+        branch_code = str(data.get("branch_code", ""))
+
+        proto_tx = pb2.Transaction(
+            id=str(tx_id),
+            source_node=str(u),
+            target_node=str(v),
+            amount=amount,
+            currency=currency,
+            timestamp=ts,
+            type=tx_type,
+            reference=reference,
+            branch_code=branch_code,
+        )
+        proto_transactions.append(proto_tx)
+        tx_count += 1
+
+    proto_nodes: Dict[str, Any] = {}
+    for node_id in sorted(reachable_nodes, key=str):
+        node_data = graph.nodes.get(node_id, {})
+        sid = str(node_id)
+        risk_raw = node_data.get("risk_score", 0.5)
+        risk_rating = "high" if risk_raw > 0.7 else ("medium" if risk_raw > 0.3 else "low")
+        proto_nodes[sid] = pb2.NodeAttributes(
+            id=sid,
+            name=node_data.get("name", f"Entity {node_id}"),
+            entity_type=node_data.get("entity_type", "individual"),
+            jurisdiction=node_data.get("country", "US"),
+            account_id=sid,
+            ifsc_code=node_data.get("ifsc_code", ""),
+            pan_number=node_data.get("pan_number", ""),
+            address=node_data.get("address", ""),
+            risk_rating=risk_rating,
+            swift_code=node_data.get("swift", ""),
+        )
+
+    proto_text_evidence = []
+    for idx, doc in enumerate(_evidence_documents):
+        entity_id = str(doc.get("subject_id", ""))
+        if entity_id and entity_id not in {str(n) for n in reachable_nodes}:
+            continue
+        proto_text_evidence.append(pb2.TextEvidence(
+            id=doc.get("document_id", f"ev_{idx}"),
+            source_type=doc.get("document_type", "memo"),
+            content=doc.get("body", doc.get("narrative", "")),
+            associated_entity=entity_id,
+            timestamp=_datetime_to_epoch(doc.get("date", 0)),
+        ))
+
+    ground_truth_criminals: List[str] = []
+    for crime in _ground_truth.get("crimes", []):
+        for node_id in crime.get("nodes_involved", []):
+            sid = str(node_id)
+            if sid not in ground_truth_criminals:
+                ground_truth_criminals.append(sid)
+    ground_truth_criminals = sorted(ground_truth_criminals)
+
+    fragment = pb2.GraphFragment(
+        scenario_id=f"green-{int(time.time())}",
+        generated_at=int(time.time()),
+        transactions=proto_transactions,
+        nodes=proto_nodes,
+        text_evidence=proto_text_evidence,
+        ground_truth_criminals=ground_truth_criminals,
+    )
+    return fragment
+
+
+@app.post("/a2a")
+async def a2a_endpoint(http_request: Request):
+    """A2A protocol endpoint: receive InvestigationRequest, return GraphFragment.
+
+    Accepts protobuf (application/x-protobuf) or JSON.
+    Returns protobuf by default, or JSON if Accept header requests it.
+    """
+    if _current_graph is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No graph loaded. Generate data first with --generate-on-startup.",
+        )
+
+    content_type = http_request.headers.get("content-type", "")
+    body = await http_request.body()
+
+    subject_id: str = ""
+    hop_depth: int = DEFAULT_HOP_DEPTH
+
+    if PROTOBUF_CONTENT_TYPE in content_type and PROTOBUF_AVAILABLE and pb2 is not None:
+        req = pb2.InvestigationRequest()
+        req.ParseFromString(body)
+        subject_id = req.subject_id
+        hop_depth = req.hop_depth if req.hop_depth > 0 else DEFAULT_HOP_DEPTH
+        logger.info(
+            "A2A request (protobuf): subject_id=%s, hop_depth=%d, case_id=%s",
+            subject_id, hop_depth, req.case_id,
+        )
+    else:
+        import json as _json
+        try:
+            data = _json.loads(body)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid request body")
+        subject_id = data.get("subject_id", "")
+        hop_depth = int(data.get("hop_depth", DEFAULT_HOP_DEPTH))
+        logger.info(
+            "A2A request (JSON): subject_id=%s, hop_depth=%d",
+            subject_id, hop_depth,
+        )
+
+    if not subject_id:
+        raise HTTPException(status_code=422, detail="subject_id is required")
+
+    resolved_id = _resolve_account_id(subject_id)
+    if resolved_id not in _current_graph.nodes():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Subject node not found: {subject_id}",
+        )
+
+    fragment = _build_graph_fragment(_current_graph, resolved_id, hop_depth)
+
+    accept = http_request.headers.get("accept", "")
+    if "application/json" in accept and "application/x-protobuf" not in accept:
+        fragment_dict = {
+            "scenario_id": fragment.scenario_id,
+            "generated_at": fragment.generated_at,
+            "transactions": [
+                {
+                    "id": tx.id,
+                    "source_node": tx.source_node,
+                    "target_node": tx.target_node,
+                    "amount": tx.amount,
+                    "currency": tx.currency,
+                    "timestamp": tx.timestamp,
+                    "type": tx.type,
+                    "reference": tx.reference,
+                    "branch_code": tx.branch_code,
+                }
+                for tx in fragment.transactions
+            ],
+            "nodes": {
+                nid: {
+                    "id": na.id,
+                    "name": na.name,
+                    "entity_type": na.entity_type,
+                    "jurisdiction": na.jurisdiction,
+                    "account_id": na.account_id,
+                    "address": na.address,
+                    "risk_rating": na.risk_rating,
+                    "swift_code": na.swift_code,
+                }
+                for nid, na in fragment.nodes.items()
+            },
+            "text_evidence": [
+                {
+                    "id": ev.id,
+                    "source_type": ev.source_type,
+                    "content": ev.content,
+                    "associated_entity": ev.associated_entity,
+                    "timestamp": ev.timestamp,
+                }
+                for ev in fragment.text_evidence
+            ],
+            "ground_truth_criminals": list(fragment.ground_truth_criminals),
+        }
+        return JSONResponse(content=fragment_dict)
+
+    return FastAPIResponse(
+        content=fragment.SerializeToString(),
+        media_type=PROTOBUF_CONTENT_TYPE,
+    )
+
+
+@app.post("/results")
+async def submit_results(http_request: Request):
+    """Receive investigation results from Purple Agent.
+
+    Accepts JSON with X-Idempotency-Key header for deduplication.
+    Stores results and returns acknowledgment.
+    """
+    import json as _json
+
+    idempotency_key = http_request.headers.get("X-Idempotency-Key", "")
+
+    if idempotency_key and idempotency_key in _investigation_results:
+        logger.info("Duplicate submission detected (key=%s), returning cached ack", idempotency_key)
+        return JSONResponse(content={
+            "status": "accepted",
+            "duplicate": True,
+            "idempotency_key": idempotency_key,
+        })
+
+    body = await http_request.body()
+    try:
+        result = _json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    result["received_at"] = int(time.time())
+    result["idempotency_key"] = idempotency_key
+
+    storage_key = idempotency_key or f"result-{int(time.time())}"
+    _investigation_results[storage_key] = result
+
+    logger.info(
+        "Investigation result received: case_id=%s, typology=%s, entities=%d, confidence=%.2f",
+        result.get("case_id", "?"),
+        result.get("typology_detected", "?"),
+        len(result.get("involved_entities", [])),
+        result.get("confidence_score", 0.0),
+    )
+
+    return JSONResponse(content={
+        "status": "accepted",
+        "duplicate": False,
+        "idempotency_key": idempotency_key,
+        "case_id": result.get("case_id", ""),
+    })
 
 
 # Investigation Assessment Endpoint
@@ -538,15 +863,15 @@ async def get_transactions(
         "application/x-protobuf" in accept 
         and PROTOBUF_AVAILABLE 
         and pb2 is not None
-        and hasattr(pb2, "TransactionListResponse")
-        and hasattr(pb2, "Transaction")
+        and hasattr(pb2, "LegacyTransactionListResponse")
+        and hasattr(pb2, "LegacyTransaction")
     ):
         # Convert to Protobuf
-        proto_response = pb2.TransactionListResponse(  # type: ignore[attr-defined]
+        proto_response = pb2.LegacyTransactionListResponse(  # type: ignore[attr-defined]
             account_id=response_model.account_id,
             transaction_count=response_model.transaction_count,
             transactions=[
-                pb2.Transaction(  # type: ignore[attr-defined]
+                pb2.LegacyTransaction(  # type: ignore[attr-defined]
                     transaction_id=txn.transaction_id,
                     source=txn.source,
                     target=txn.target,
@@ -1035,8 +1360,7 @@ __all__ = [
     'set_evidence',
     'create_agent_json',
     'PROTOBUF_AVAILABLE',
-    # Tool call tracking
     'reset_tool_counter',
     'increment_tool_counter',
-    'get_tool_count'
+    'get_tool_count',
 ]

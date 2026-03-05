@@ -18,7 +18,6 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 import random
-import uuid
 import json
 import logging
 from faker import Faker
@@ -171,7 +170,7 @@ def inject_structuring(
         G.add_edge(
             source_id,
             mule_id,
-            transaction_id=f"txn_{uuid.uuid4().hex[:8]}",
+            transaction_id=f"txn_{random.getrandbits(32):08x}",
             amount=amount,
             currency='USD',
             timestamp=timestamp,
@@ -192,7 +191,7 @@ def inject_structuring(
                     G.add_edge(
                         source_id,
                         decoy_target,
-                        transaction_id=f"txn_{uuid.uuid4().hex[:8]}",
+                        transaction_id=f"txn_{random.getrandbits(32):08x}",
                         amount=round(random.uniform(50, 500), 2),
                         currency='USD',
                         timestamp=timestamp + timedelta(hours=random.uniform(-24, 24)),
@@ -382,7 +381,7 @@ def inject_layering(
                     G.add_edge(
                         new_node,
                         decoy_target,
-                        transaction_id=f"txn_{uuid.uuid4().hex[:8]}",
+                        transaction_id=f"txn_{random.getrandbits(32):08x}",
                         amount=round(random.uniform(100, 5000), 2),
                         currency='USD',
                         timestamp=datetime.now() + timedelta(hours=random.uniform(-24, 24)),
@@ -426,7 +425,7 @@ def inject_layering(
         G.add_edge(
             src,
             tgt,
-            transaction_id=f"txn_{uuid.uuid4().hex[:8]}",
+            transaction_id=f"txn_{random.getrandbits(32):08x}",
             amount=round(amount, 2),
             currency='USD',
             timestamp=timestamp,
@@ -505,21 +504,32 @@ def validate_no_cycles(G: nx.DiGraph, crime_edges: List[Tuple[int, int]]) -> boo
     Validate that injected crime edges don't create cycles.
     
     Args:
-        G: NetworkX DiGraph
-        crime_edges: List of edges that were added for crime
+        G: NetworkX DiGraph or MultiDiGraph
+        crime_edges: List of edges that were added for crime (u, v)
     
     Returns:
-        True if no cycles exist involving crime edges
+        True if no cycles exist involving the injected crime edges
     """
-    # Create subgraph with crime edges
-    crime_subgraph = G.edge_subgraph(crime_edges)
-    
-    # Check for cycles
+    # IMPORTANT: We must only consider the injected edges themselves.
+    # Using subgraph(crime_nodes) would also include pre-existing edges
+    # between those nodes and could report cycles that existed BEFORE
+    # crime injection. We instead build an edge-induced subgraph that
+    # contains exactly the crime_edges.
+    if isinstance(G, nx.MultiDiGraph):
+        edge_keys: List[Tuple[int, int, int]] = []
+        for u, v in crime_edges:
+            if G.has_edge(u, v):
+                for key in G[u][v].keys():
+                    edge_keys.append((u, v, key))
+        crime_subgraph = G.edge_subgraph(edge_keys).copy()
+    else:
+        crime_subgraph = G.edge_subgraph(crime_edges).copy()
+
     try:
         nx.find_cycle(crime_subgraph)
-        return False  # Cycle found
+        return False  # Cycle found within injected edges
     except nx.NetworkXNoCycle:
-        return True  # No cycles
+        return True  # No cycles introduced by injected edges
 
 
 def get_crime_labels(G: nx.DiGraph) -> Dict[Tuple[int, int], str]:
