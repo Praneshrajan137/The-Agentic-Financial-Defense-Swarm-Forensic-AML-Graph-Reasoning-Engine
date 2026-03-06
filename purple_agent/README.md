@@ -2,7 +2,6 @@
 
 Autonomous forensic financial crime investigator.
 
-**Competition:** AgentX-AgentBeats Finance Track
 **Protocol:** The Panopticon Protocol v12.0
 
 ## Overview

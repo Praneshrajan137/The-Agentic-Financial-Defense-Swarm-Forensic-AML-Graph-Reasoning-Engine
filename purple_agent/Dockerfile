@@ -14,7 +14,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # TCMalloc for high-performance memory management
-# x86_64 only (competition target). ARM64: /usr/lib/aarch64-linux-gnu/...
+# x86_64 only (primary target). ARM64: /usr/lib/aarch64-linux-gnu/...
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libtcmalloc-minimal4 && \
     rm -rf /var/lib/apt/lists/*

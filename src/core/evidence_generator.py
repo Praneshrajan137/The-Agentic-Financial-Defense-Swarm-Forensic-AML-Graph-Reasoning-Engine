@@ -9,7 +9,7 @@ This forces the Purple Agent to combine:
 2. Information extraction (finding entity IDs in text)
 3. Graph querying (following the extracted IDs)
 
-This is the "Sherlock Holmes" upgrade that makes the benchmark cognitively challenging.
+This is the "Sherlock Holmes" upgrade that makes the platform cognitively challenging.
 """
 
 from typing import List, Dict, Any, Optional

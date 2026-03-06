@@ -15,7 +15,7 @@ version: '3.8'
 
 services:
   # ==========================================================================
-  # GREEN AGENT - The Judge (Server)
+  # GREEN AGENT - Data Generator (Server)
   # ==========================================================================
   green-agent:
     image: praneshrajan15/green-financial-crime-agent:latest
@@ -50,7 +50,7 @@ services:
       retries: 3
       start_period: 30s
     networks:
-      - benchmark-network
+      - agent-network
 
   # ==========================================================================
   # PURPLE AGENT - Baseline Investigator (Client)
@@ -72,18 +72,18 @@ services:
       --participant-id ${PARTICIPANT_ID:-baseline_purple_agent}
       --nodes 0 42 100
     networks:
-      - benchmark-network
+      - agent-network
     # Purple agent runs once and exits
     restart: "no"
 
   # ==========================================================================
-  # BENCHMARK RUNNER - Reproducibility Demonstration
+  # REPRODUCIBILITY RUNNER - Deterministic Verification
   # ==========================================================================
-  benchmark-runner:
+  reproducibility-runner:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: benchmark-runner
+    container_name: reproducibility-runner
     volumes:
       - ./outputs:/mnt/user-data/outputs
       - ./results:/mnt/user-data/results
@@ -97,14 +97,14 @@ services:
       --seed ${SEED:-42}
       --difficulty ${DIFFICULTY:-5}
       --runs ${RUNS:-3}
-      --output /mnt/user-data/results/benchmark_results.json
+      --output /mnt/user-data/results/reproducibility_results.json
     networks:
-      - benchmark-network
+      - agent-network
     profiles:
-      - benchmark
+      - reproducibility
     restart: "no"
 
 networks:
-  benchmark-network:
+  agent-network:
     driver: bridge
     name: panopticon-network

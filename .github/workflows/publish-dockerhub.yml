@@ -1,4 +1,4 @@
-# Publish to Docker Hub (for AgentBeats Competition)
+# Publish to Docker Hub
 # This workflow pushes the Docker image to Docker Hub as a backup to GHCR
 
 name: Publish to Docker Hub

@@ -9,7 +9,7 @@ This agent is intentionally SIMPLE. It:
 3. Applies a simple heuristic (count incoming edges)
 4. Returns a verdict
 
-Purpose: Prove the benchmark is solvable and the interface works.
+Purpose: Demonstrate the platform is functional and the interface works.
 """
 
 import requests

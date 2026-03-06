@@ -1,6 +1,6 @@
 [scenario]
 name = "financial_crime_investigation"
-description = "Synthetic Financial Crime Detection Benchmark - The Panopticon Protocol"
+description = "Synthetic Financial Crime Detection Platform - The Panopticon Protocol"
 version = "1.0.0"
 difficulty_levels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 default_difficulty = 5
@@ -21,7 +21,7 @@ difficulty = 5
 include_conflicting_evidence = true
 
 [agents]
-[agents.judge]
+[agents.green_agent]
 image = "financial-crime-green"
 port = 8000
 description = "Green Agent - Synthetic Crime Generator (The God of Chaos)"
@@ -53,11 +53,3 @@ efficiency_metrics = true
 dynamic_difficulty = true
 conflicting_evidence = true
 needle_in_haystack = false
-
-[judging_criteria]
-technical_correctness = "Proper A2A protocol, valid graph topology"
-benchmark_design_quality = "Requires cognitive reasoning, not just SQL queries"
-evaluation_methodology = "Efficiency metrics, precision/recall, narrative scoring"
-innovation = "Dynamic difficulty, conflicting evidence, evidence generation"
-documentation = "Clear README, setup instructions, API documentation"
-reproducibility = "Seeded generation, deterministic outputs"

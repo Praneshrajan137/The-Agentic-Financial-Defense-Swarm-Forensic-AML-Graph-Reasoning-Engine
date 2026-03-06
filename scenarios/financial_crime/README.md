@@ -1,15 +1,14 @@
-# Financial Crime Investigation Benchmark
-## The Panopticon Protocol - Phase 1 Submission
+# Financial Crime Investigation Platform
+## The Panopticon Protocol
 
-**Status:** Phase 1 Complete (100%) + Winning Features  
-**Competition:** AgentX-AgentBeats Financial Crime Track  
-**Submission Date:** January 2026
+**Status:** Production Ready  
+**Version:** 1.0.0
 
 ---
 
 ## Executive Summary
 
-This benchmark implements a **Zero-Failure Synthetic Financial Crime Simulator** designed to train and evaluate autonomous AML investigation agents. Unlike static datasets, this system generates dynamic, statistically realistic financial networks with surgically injected money laundering typologies.
+This platform implements a **Zero-Failure Synthetic Financial Crime Simulator** designed to train and evaluate autonomous AML investigation agents. Unlike static datasets, this system generates dynamic, statistically realistic financial networks with surgically injected money laundering typologies.
 
 ### Key Innovations
 
@@ -29,7 +28,7 @@ This benchmark implements a **Zero-Failure Synthetic Financial Crime Simulator**
 - Python 3.10+
 - 4GB RAM
 
-### Run the Benchmark
+### Run the Platform
 
 ```bash
 # Clone and navigate
@@ -84,7 +83,7 @@ python src/baseline_agent.py --nodes 0 42 100
 
 ### Purple Agent (The Baseline)
 
-**Purpose:** Prove the benchmark is solvable
+**Purpose:** Demonstrate the platform is functional
 
 **Logic:**
 1. Connect to Green Agent A2A interface
@@ -192,35 +191,6 @@ Purple Agents are scored on:
 
 ---
 
-## Judging Criteria Compliance
-
-### Technical Correctness
-- Valid A2A protocol (agent.json manifest)
-- Proper graph topology (scale-free, DAG)
-- Protobuf support (80% size reduction)
-
-### Benchmark Design Quality
-- **Sherlock Holmes upgrade:** Requires reading emails, not just SQL
-- **Conflicting evidence:** Tests hallucination resistance
-- Forces cognitive reasoning
-
-### Evaluation Methodology
-- Multi-metric scoring (not just accuracy)
-- Efficiency tracking (tool call counts)
-- Rubric breakdown by category
-
-### Innovation
-- Dynamic difficulty (10 levels)
-- Evidence generation (unique to this benchmark)
-- SDV statistical realism (not random data)
-
-### Reproducibility
-- Seeded generation (same seed = identical output)
-- Deterministic crime injection
-- Complete test suite (90%+ coverage)
-
----
-
 ## File Structure
 
 ```
@@ -245,7 +215,7 @@ project_root/                           # Green Agent lives at root
 │   └── requirements.txt
 └── scenarios/
     └── financial_crime/
-        ├── scenario.toml               # Competition configuration
+        ├── scenario.toml               # Scenario configuration
         ├── README.md                   # This file
         └── docker-compose.yml          # Run both agents
 ```
@@ -271,7 +241,7 @@ project_root/                           # Green Agent lives at root
 
 ---
 
-## Future Enhancements (Phase 2)
+## Future Enhancements
 
 1. **Needle in Haystack** - 1,000 documents, 3 contain clues
 2. **Additional Crime Types** - Round-tripping, trade-based ML
@@ -286,7 +256,6 @@ project_root/                           # Green Agent lives at root
 1. FinCEN - Bank Secrecy Act Regulations
 2. FATF - Money Laundering Typologies
 3. SDV Documentation - Gaussian Copula Synthesis
-4. AgentX-AgentBeats Competition Guidelines
 
 ---
 
@@ -297,11 +266,6 @@ MIT License - See LICENSE file for details.
 ---
 
 ## Contact
-
-For questions about this benchmark:
-- Competition: AgentX-AgentBeats Financial Crime Track
-- Phase: 1 (Benchmark Design)
-- Submission: January 31, 2026
 
 **Author:** The Panopticon Team  
 **Version:** 1.0.0 - The Panopticon Protocol  

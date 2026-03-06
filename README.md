@@ -1,6 +1,6 @@
 # The Panopticon Protocol
 
-**A Zero-Failure Synthetic Financial Crime Investigation Benchmark**
+**A Zero-Failure Synthetic Financial Crime Investigation Platform**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Docker](https://img.shields.io/badge/docker-required-blue.svg)](https://www.docker.com/)
@@ -17,7 +17,7 @@ The **Green Financial Crime Agent** generates synthetic financial transaction ne
 3. **Cognitive Reasoning** - Distinguish reliable from conflicting evidence
 4. **Efficiency** - Minimize tool calls while maximizing detection accuracy
 
-The benchmark supports 10 difficulty levels, from trivial (4-hour time windows, clustered amounts) to expert (3-month spreads, minimal patterns, decoy transactions).
+The platform supports 10 difficulty levels, from trivial (4-hour time windows, clustered amounts) to expert (3-month spreads, minimal patterns, decoy transactions).
 
 ### Key Innovations
 
@@ -80,7 +80,7 @@ python src/baseline_agent.py --green-url http://localhost:8000 --nodes 0 42 100
 ### Option 3: Single Command End-to-End
 
 ```bash
-# Run benchmark with reproducibility demonstration
+# Run reproducibility demonstration
 python scripts/run_benchmark.py --seed 42 --difficulty 5 --runs 3 --output results.json
 ```
 
@@ -275,7 +275,7 @@ Purple Agents are scored on five dimensions:
 
 ## Reproducibility
 
-This benchmark is designed for reproducible evaluation.
+This platform is designed for reproducible evaluation.
 
 ### Determinism Guarantees
 
@@ -423,11 +423,11 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ## Citation
 
-If you use this benchmark in your research, please cite:
+If you use this platform in your research, please cite:
 
 ```bibtex
 @software{panopticon_protocol,
-  title = {The Panopticon Protocol: A Synthetic Financial Crime Investigation Benchmark},
+  title = {The Panopticon Protocol: A Synthetic Financial Crime Investigation Platform},
   year = {2026},
   url = {https://github.com/Praneshrajan137/The-Agentic-Financial-Defense-Swarm-Forensic-AML-Graph-Reasoning-Engine}
 }
@@ -437,6 +437,5 @@ If you use this benchmark in your research, please cite:
 
 ## Contact
 
-- **Competition**: AgentX-AgentBeats Financial Crime Track
 - **Version**: 1.0.0
 - **Status**: Production Ready

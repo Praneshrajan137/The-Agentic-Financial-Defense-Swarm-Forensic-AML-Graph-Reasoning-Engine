@@ -3,7 +3,6 @@
 > **Project Gamma | The Panopticon Protocol**
 > **Spec Version:** v11.0 (`.cursorrules` definitive -- all v6.x through v10.x defects pre-resolved)
 > **Agent Version:** 7.0.0 (`config.py` / `agent.json`)
-> **Competition:** AgentX-AgentBeats Finance Track
 > **Python:** 3.11+ required (`X | None` union syntax, `tomllib`, etc.)
 
 ---
@@ -276,7 +275,7 @@ Files marked with **[EXISTS]** are present in the repository. Files marked with
 ```
 purple_agent/
 +-- agent.json                    [EXISTS]  A2A agent card (capabilities, endpoints)
-+-- scenario.toml                 [EXISTS]  Competition scenario config
++-- scenario.toml                 [EXISTS]  Scenario configuration
 +-- Dockerfile                    [EXISTS]  Container definition (requires upgrade to spec)
 +-- .dockerignore                 [EXISTS]  Excludes .git, tests, .env, scripts/
 +-- requirements.txt              [EXISTS]  Pinned deps (NO >= ranges)
@@ -934,7 +933,7 @@ graph LR
 | D2 | Docker Build Verification | A5, C3 |
 | D3 | Determinism Verification | C3 |
 | D4 | Pre-flight Script | C3 |
-| D5 | Final Submission Polish | D1, D2, D3, D4 |
+| D5 | Final Release Polish | D1, D2, D3, D4 |
 
 ---
 
@@ -991,7 +990,7 @@ No quantize at ingestion -- preserve full precision for arithmetic.
 
 ### Deferred: Fan-Out Structuring
 
-Competition evaluates fan-in scenarios. Fan-out is a future phase.
+Current scope covers fan-in scenarios. Fan-out is a future phase.
 
 ### Deferred: Hypothesis Property Testing
 

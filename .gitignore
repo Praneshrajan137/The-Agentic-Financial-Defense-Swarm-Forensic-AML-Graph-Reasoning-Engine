@@ -55,7 +55,7 @@ results/
 # Cursor
 .cursor/
 
-# Project specific development artifacts (not needed for submission)
+# Project specific development artifacts
 .gemini/
 .claude/
 .mypy_cache/
