@@ -10,19 +10,34 @@ Supported Crime Types:
 Technical Specifications:
 - Structuring: 20 transfers to 1 mule, $9k-$9.8k each, 48hr window
 - Layering: Directed chain with 2-5% decay per hop, no cycles
+
+v8.0: Decimal-everywhere for all currency amounts.
+      CRITICAL: All amounts are Decimal(str(value)), NEVER float.
+      All magic numbers replaced with config imports.
 """
 
 import networkx as nx
 from typing import List, Tuple, Optional, Dict, Any, Union
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 import random
 import json
 import logging
 from faker import Faker
 
 from .evidence_generator import EvidenceGenerator
+from ..config import (
+    STRUCTURING_MIN_AMOUNT_USD,
+    STRUCTURING_MAX_AMOUNT_USD,
+    STRUCTURING_NUM_SOURCES,
+    STRUCTURING_TIME_WINDOW_HOURS,
+    LAYERING_DEFAULT_CHAIN_LENGTH,
+    LAYERING_MIN_DECAY,
+    LAYERING_MAX_DECAY,
+    LAYERING_INITIAL_AMOUNT,
+)
 
 logger = logging.getLogger(__name__)
 
