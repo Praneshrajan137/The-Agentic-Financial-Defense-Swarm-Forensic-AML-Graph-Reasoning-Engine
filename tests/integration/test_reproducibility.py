@@ -478,12 +478,12 @@ class TestFullPipelineReproducibility:
     def test_assessment_reproducibility(self, seed, difficulty):
         """Test that assessment scoring is reproducible."""
         from src.core.a2a_interface import (
-            _calculate_pattern_score,
-            _calculate_evidence_quality,
-            _calculate_narrative_clarity,
-            _calculate_completeness
+            _compute_entity_metrics,
+            _compute_typology_score,
+            _validate_five_ws,
+            _compute_efficiency_score,
         )
-        
+
         # Same investigation data
         investigation_data = {
             'identified_crimes': [{'crime_type': 'structuring', 'nodes': [0]}],
@@ -493,33 +493,24 @@ class TestFullPipelineReproducibility:
             'temporal_patterns': True,
             'amount_patterns': True
         }
-        
+
         ground_truth = {
             'crimes': [
                 {'crime_type': 'structuring', 'nodes_involved': [0, 1, 2], 'metadata': {'mule_id': 0}}
             ]
         }
-        
+
         # Calculate scores twice
-        scores1 = {
-            'pattern': _calculate_pattern_score(
-                investigation_data['identified_crimes'],
-                ground_truth['crimes']
-            ),
-            'evidence': _calculate_evidence_quality(investigation_data),
-            'narrative': _calculate_narrative_clarity(investigation_data),
-            'completeness': _calculate_completeness(investigation_data, ground_truth)
-        }
-        
-        scores2 = {
-            'pattern': _calculate_pattern_score(
-                investigation_data['identified_crimes'],
-                ground_truth['crimes']
-            ),
-            'evidence': _calculate_evidence_quality(investigation_data),
-            'narrative': _calculate_narrative_clarity(investigation_data),
-            'completeness': _calculate_completeness(investigation_data, ground_truth)
-        }
-        
+        metrics1 = _compute_entity_metrics(investigation_data, ground_truth)
+        typology1 = _compute_typology_score(
+            investigation_data['identified_crimes'], ground_truth['crimes']
+        )
+
+        metrics2 = _compute_entity_metrics(investigation_data, ground_truth)
+        typology2 = _compute_typology_score(
+            investigation_data['identified_crimes'], ground_truth['crimes']
+        )
+
         # Scores should be identical
-        assert scores1 == scores2, "Assessment scoring should be deterministic"
+        assert metrics1.f1 == metrics2.f1, "Entity F1 should be deterministic"
+        assert typology1.correct == typology2.correct, "Typology scoring should be deterministic"

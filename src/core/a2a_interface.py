@@ -16,8 +16,10 @@ from fastapi.responses import Response as FastAPIResponse, JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
+from decimal import Decimal
 from collections import deque
 from enum import Enum
+import re
 import networkx as nx
 import uuid
 import time
@@ -30,6 +32,23 @@ from src.config import (
     DEFAULT_HOP_DEPTH,
     MAX_FRAGMENT_TRANSACTIONS,
     MAX_FRAGMENT_NODES,
+    RUBRIC_WEIGHT_PATTERN,
+    RUBRIC_WEIGHT_EVIDENCE,
+    RUBRIC_WEIGHT_NARRATIVE,
+    RUBRIC_WEIGHT_COMPLETENESS,
+    RUBRIC_WEIGHT_EFFICIENCY,
+    EFFICIENCY_TIER_EXCELLENT_MAX,
+    EFFICIENCY_TIER_GOOD_MAX,
+    EFFICIENCY_TIER_FAIR_MAX,
+    SAR_FIVE_WS_PATTERN,
+)
+from src.core.result_types import (
+    EntityMetrics,
+    HallucinationCheck,
+    FiveWsValidation,
+    TypologyScore,
+    EfficiencyScore,
+    AssessmentResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -173,9 +192,10 @@ class InvestigationAssessmentResponse(BaseModel):
     feedback: str
     rubric_breakdown: Optional[RubricBreakdown] = None
     missed_indicators: Optional[List[str]] = None
-    tool_call_count: int = 0  # Number of tool calls made
-    efficiency_score: float = 0.0  # Efficiency score (0-100)
-    efficiency_rank: str = "unknown"  # Rank: "excellent", "good", "fair", "poor"
+    tool_call_count: int = 0
+    efficiency_score: float = 0.0
+    efficiency_rank: str = "unknown"
+    assessment_detail: Optional[Dict[str, Any]] = None  # v8.0: full structured result
 
 
 # Transaction Endpoints
@@ -710,83 +730,90 @@ async def investigation_assessment(
     request: InvestigationAssessmentRequest
 ) -> InvestigationAssessmentResponse:
     """
-    Evaluate a participant's investigation and return scored assessment with EFFICIENCY.
-    
-    This endpoint compares the participant's findings against ground truth
-    and provides detailed feedback including efficiency metrics.
-    
-    The assessment evaluates:
-    - Pattern identification (28%): How well did the participant identify crime patterns?
-    - Evidence quality (20%): Quality and completeness of supporting evidence
-    - Narrative clarity (16%): Clarity and structure of the investigation narrative
-    - Completeness (16%): Coverage of all indicators in ground truth
-    - Efficiency (20%): How few tool calls were needed
+    Evaluate a participant's investigation and return scored assessment.
+
+    v8.0 Enhanced Assessment Engine:
+    - Entity-level Precision/Recall/F1 against ground truth
+    - Hallucination detection (entities/amounts not in graph)
+    - SAR Five Ws completeness validation
+    - Typology identification scoring
+    - Efficiency scoring by tool call count
+
+    Rubric weights (from config, must sum to 1.0):
+      Pattern 0.28 | Evidence 0.20 | Narrative 0.16 | Completeness 0.16 | Efficiency 0.20
     """
     if not _ground_truth:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="No ground truth loaded. Generate and inject crimes first."
         )
-    
-    # Extract investigation data
+
     investigation_data = request.investigation_data or {}
-    
-    # Get crimes from ground truth
     actual_crimes = _ground_truth.get('crimes', [])
     identified_crimes = investigation_data.get('identified_crimes', [])
-    
-    # Calculate individual scores
-    pattern_score = _calculate_pattern_score(identified_crimes, actual_crimes)
-    evidence_score = _calculate_evidence_quality(investigation_data)
-    narrative_score = _calculate_narrative_clarity(investigation_data)
-    completeness_score = _calculate_completeness(investigation_data, _ground_truth)
-    
-    # Calculate efficiency score based on tool call count
+
+    # ── 1. Entity Metrics (P/R/F1) ──────────────────────────────────
+    entity_metrics = _compute_entity_metrics(investigation_data, _ground_truth)
+
+    # ── 2. Typology Scoring ─────────────────────────────────────────
+    typology = _compute_typology_score(identified_crimes, actual_crimes)
+
+    # ── 3. Hallucination Check ──────────────────────────────────────
+    hallucination_check = _check_hallucinations(investigation_data, _current_graph)
+
+    # ── 4. Five Ws Validation ───────────────────────────────────────
+    five_ws = _validate_five_ws(investigation_data.get('sar_narrative', ''))
+
+    # ── 5. Efficiency Scoring ───────────────────────────────────────
     tool_count = get_tool_count(request.participant_id)
-    
-    # Efficiency scoring:
-    # - Optimal: 10-50 calls = 100 points (excellent)
-    # - Good: 51-100 calls = 80 points (good)
-    # - Fair: 101-200 calls = 60 points (fair)
-    # - Poor: 200+ calls = decreasing score (poor)
-    if tool_count <= 50:
-        efficiency_score = 100.0
-        efficiency_rank = "excellent"
-    elif tool_count <= 100:
-        efficiency_score = 80.0
-        efficiency_rank = "good"
-    elif tool_count <= 200:
-        efficiency_score = 60.0
-        efficiency_rank = "fair"
-    else:
-        efficiency_score = max(40.0 - (tool_count - 200) * 0.1, 10.0)
-        efficiency_rank = "poor"
-    
-    # Calculate overall score with efficiency (weighted average)
-    weights = {
-        'pattern': 0.28,      # Reduced from 0.35
-        'evidence': 0.20,     # Reduced from 0.25
-        'narrative': 0.16,    # Reduced from 0.20
-        'completeness': 0.16, # Reduced from 0.20
-        'efficiency': 0.20    # NEW
-    }
-    
+    efficiency = _compute_efficiency_score(tool_count)
+
+    # ── 6. Weighted Overall Score ───────────────────────────────────
+    pattern_score = float(typology.score) * 100
+    evidence_score = float(entity_metrics.f1) * 100
+    narrative_score = float(five_ws.completeness_score) * 100
+    completeness_score = float(entity_metrics.recall) * 100
+    eff_score = float(efficiency.score)
+
+    # Apply hallucination penalty: -20 per hallucination (capped)
+    hallucination_penalty = min(hallucination_check.total_hallucinations * 20, 50)
+
     total_score = (
-        pattern_score * weights['pattern'] +
-        evidence_score * weights['evidence'] +
-        narrative_score * weights['narrative'] +
-        completeness_score * weights['completeness'] +
-        efficiency_score * weights['efficiency']
+        pattern_score * float(RUBRIC_WEIGHT_PATTERN) +
+        evidence_score * float(RUBRIC_WEIGHT_EVIDENCE) +
+        narrative_score * float(RUBRIC_WEIGHT_NARRATIVE) +
+        completeness_score * float(RUBRIC_WEIGHT_COMPLETENESS) +
+        eff_score * float(RUBRIC_WEIGHT_EFFICIENCY)
     )
-    total_score = round(total_score, 2)
-    
-    # Find missed indicators
+    total_score = max(0, round(total_score - hallucination_penalty, 2))
+
+    # ── 7. Build Assessment Result ──────────────────────────────────
+    assessment = AssessmentResult(
+        entity_metrics=entity_metrics,
+        hallucination_check=hallucination_check,
+        five_ws=five_ws,
+        typology=typology,
+        efficiency=efficiency,
+        overall_score=Decimal(str(total_score)),
+        rubric_breakdown={
+            "pattern_identification": Decimal(str(round(pattern_score * float(RUBRIC_WEIGHT_PATTERN), 2))),
+            "evidence_quality": Decimal(str(round(evidence_score * float(RUBRIC_WEIGHT_EVIDENCE), 2))),
+            "narrative_clarity": Decimal(str(round(narrative_score * float(RUBRIC_WEIGHT_NARRATIVE), 2))),
+            "completeness": Decimal(str(round(completeness_score * float(RUBRIC_WEIGHT_COMPLETENESS), 2))),
+            "efficiency": Decimal(str(round(eff_score * float(RUBRIC_WEIGHT_EFFICIENCY), 2))),
+            "hallucination_penalty": Decimal(str(-hallucination_penalty)),
+        },
+        raw_submission=investigation_data,
+    )
+
+    # ── 8. Build legacy response ────────────────────────────────────
     missed = _find_missed_indicators(investigation_data, _ground_truth)
-    
-    # Generate feedback with efficiency info
     feedback = _generate_feedback(total_score, missed)
-    feedback += f"\n\nEfficiency: {tool_count} tool calls ({efficiency_rank})"
-    
+    feedback += f"\n\nEntity P/R/F1: {entity_metrics.precision}/{entity_metrics.recall}/{entity_metrics.f1}"
+    feedback += f"\nHallucinations: {hallucination_check.total_hallucinations}"
+    feedback += f"\nFive Ws: {five_ws.completeness_score}"
+    feedback += f"\nEfficiency: {tool_count} tool calls ({efficiency.tier})"
+
     return InvestigationAssessmentResponse(
         score=total_score,
         feedback=feedback,
@@ -798,8 +825,9 @@ async def investigation_assessment(
         ),
         missed_indicators=missed,
         tool_call_count=tool_count,
-        efficiency_score=efficiency_score,
-        efficiency_rank=efficiency_rank
+        efficiency_score=eff_score,
+        efficiency_rank=efficiency.tier,
+        assessment_detail=assessment.to_dict(),
     )
 
 
@@ -972,8 +1000,8 @@ async def get_account_connections(
                 total_amount=0.0
             )
         connections[target].transaction_count += 1
-        connections[target].total_amount += data.get("amount", 0.0)
-    
+        connections[target].total_amount += float(data.get("amount", 0))
+
     # Inbound connections (this account is receiver)
     for source, _, data in _current_graph.in_edges(account_id, data=True):
         if source not in connections:
@@ -987,7 +1015,7 @@ async def get_account_connections(
             # Already exists as receiver, so now it's both
             connections[source].relationship = ConnectionRelationship.BOTH
         connections[source].transaction_count += 1
-        connections[source].total_amount += data.get("amount", 0.0)
+        connections[source].total_amount += float(data.get("amount", 0))
     
     # TODO: Implement depth > 1 traversal if needed
     
@@ -1058,166 +1086,184 @@ async def get_evidence(request: GetEvidenceRequest) -> EvidenceListResponse:
 # Assessment Helper Functions
 # =============================================================================
 
-def _calculate_pattern_score(
-    identified_crimes: List[Dict[str, Any]], 
-    actual_crimes: List[Dict[str, Any]]
-) -> float:
+def _compute_entity_metrics(
+    investigation_data: Dict[str, Any],
+    ground_truth: Dict[str, Any],
+) -> EntityMetrics:
+    """Compute entity-level Precision/Recall/F1 against ground truth.
+
+    Compares `investigation_data['suspicious_accounts']` (what Purple flagged)
+    against `ground_truth['crimes'][*]['nodes_involved']` (actual criminals).
     """
-    Calculate score for pattern identification (precision/recall based).
-    
-    Args:
-        identified_crimes: List of crimes identified by the participant
-        actual_crimes: List of actual crimes in ground truth
-    
-    Returns:
-        Score from 0 to 100
-    """
+    # Build ground truth entity set
+    gt_entities: set[str] = set()
+    for crime in ground_truth.get('crimes', []):
+        for node in crime.get('nodes_involved', []):
+            gt_entities.add(str(node))
+
+    # Build predicted entity set
+    predicted: set[str] = set()
+    for acct in investigation_data.get('suspicious_accounts', []):
+        predicted.add(str(acct))
+    # Also check identified_crimes for nodes
+    for crime in investigation_data.get('identified_crimes', []):
+        for node in crime.get('nodes', []):
+            predicted.add(str(node))
+
+    tp = sorted(predicted & gt_entities)
+    fp = sorted(predicted - gt_entities)
+    fn = sorted(gt_entities - predicted)
+
+    return EntityMetrics(
+        true_positives=tp,
+        false_positives=fp,
+        false_negatives=fn,
+    )
+
+
+def _compute_typology_score(
+    identified_crimes: List[Dict[str, Any]],
+    actual_crimes: List[Dict[str, Any]],
+) -> TypologyScore:
+    """Score whether Purple correctly identified the crime typology."""
     if not actual_crimes:
-        return 100.0 if not identified_crimes else 50.0
-    
-    if not identified_crimes:
-        return 0.0
-    
-    # Extract crime types and nodes from identified crimes
-    identified_set = set()
-    for crime in identified_crimes:
-        crime_type = crime.get('crime_type', '')
-        nodes = tuple(sorted(crime.get('nodes', [])))
-        identified_set.add((crime_type, nodes))
-    
-    # Extract crime types and nodes from actual crimes
-    actual_set = set()
-    for crime in actual_crimes:
-        crime_type = crime.get('crime_type', '')
-        nodes = tuple(sorted(crime.get('nodes_involved', [])))
-        actual_set.add((crime_type, nodes))
-    
-    # Calculate precision and recall
-    true_positives = len(identified_set & actual_set)
-    precision = true_positives / len(identified_set) if identified_set else 0
-    recall = true_positives / len(actual_set) if actual_set else 0
-    
-    # F1 score scaled to 100
-    if precision + recall == 0:
-        return 0.0
-    
-    f1 = 2 * (precision * recall) / (precision + recall)
-    return round(f1 * 100, 2)
+        return TypologyScore(correct=True, confidence=Decimal("1"))
+
+    expected_types = {c.get('crime_type', '') for c in actual_crimes}
+    detected_types = {c.get('crime_type', '') for c in identified_crimes}
+
+    # Primary typology is the first actual crime's type
+    primary = actual_crimes[0].get('crime_type', 'unknown')
+    detected_primary = identified_crimes[0].get('crime_type', '') if identified_crimes else ''
+
+    correct = bool(expected_types & detected_types)
+
+    return TypologyScore(
+        expected_typology=primary,
+        detected_typology=detected_primary,
+        correct=correct,
+        confidence=Decimal("1") if correct else Decimal("0"),
+        reasoning=f"Expected {expected_types}, detected {detected_types}",
+    )
 
 
-def _calculate_evidence_quality(investigation_data: Dict[str, Any]) -> float:
+def _check_hallucinations(
+    investigation_data: Dict[str, Any],
+    graph: Optional[Union[nx.DiGraph, nx.MultiDiGraph]],
+) -> HallucinationCheck:
+    """Check if Purple's submission references entities/amounts not in the graph.
+
+    A hallucination is any entity ID cited in the SAR that does NOT exist
+    as a node in the transaction graph, or any amount that doesn't match
+    any edge amount.
     """
-    Calculate score for evidence quality.
-    
-    Args:
-        investigation_data: Investigation findings from participant
-    
-    Returns:
-        Score from 0 to 100
-    """
-    score = 0.0
-    max_score = 100.0
-    
-    # Check for transaction evidence
-    if investigation_data.get('transaction_ids'):
-        score += 25.0
-    
-    # Check for account evidence
-    if investigation_data.get('suspicious_accounts'):
-        score += 25.0
-    
-    # Check for temporal analysis
-    if investigation_data.get('temporal_patterns'):
-        score += 25.0
-    
-    # Check for amount analysis
-    if investigation_data.get('amount_patterns'):
-        score += 25.0
-    
-    return min(score, max_score)
+    result = HallucinationCheck()
+
+    if graph is None:
+        result.details = "No graph loaded, skipping hallucination check"
+        return result
+
+    graph_nodes = {str(n) for n in graph.nodes()}
+    graph_amounts = set()
+    for _, _, data in graph.edges(data=True):
+        amt = data.get('amount')
+        if amt is not None:
+            graph_amounts.add(str(round(float(amt), 2)))
+
+    # Check cited entities
+    cited_entities = set()
+    for acct in investigation_data.get('suspicious_accounts', []):
+        cited_entities.add(str(acct))
+    for crime in investigation_data.get('identified_crimes', []):
+        for node in crime.get('nodes', []):
+            cited_entities.add(str(node))
+
+    for entity in cited_entities:
+        if entity not in graph_nodes:
+            result.hallucinated_entities.append(entity)
+
+    # Check cited amounts in SAR narrative
+    sar_text = investigation_data.get('sar_narrative', '') or investigation_data.get('narrative', '')
+    if sar_text:
+        # Extract dollar amounts from text
+        amount_pattern = re.compile(r'\$[\d,]+(?:\.\d{2})?')
+        for match in amount_pattern.finditer(sar_text):
+            raw = match.group().replace('$', '').replace(',', '')
+            try:
+                cited_amount = str(round(float(raw), 2))
+                # Allow threshold amounts ($10,000) -- they're definitional, not hallucinated
+                if cited_amount not in graph_amounts and float(cited_amount) not in (10000.0, 9000.0, 9800.0):
+                    result.hallucinated_amounts.append(match.group())
+            except ValueError:
+                pass
+
+    result.passed = result.total_hallucinations == 0
+    if not result.passed:
+        result.details = (
+            f"Found {len(result.hallucinated_entities)} hallucinated entities "
+            f"and {len(result.hallucinated_amounts)} hallucinated amounts"
+        )
+
+    return result
 
 
-def _calculate_narrative_clarity(investigation_data: Dict[str, Any]) -> float:
+def _validate_five_ws(sar_narrative: str) -> FiveWsValidation:
+    """Validate SAR narrative for Five Ws completeness.
+
+    Checks for <WHO>...</WHO>, <WHAT>...</WHAT>, etc. tags.
+    Falls back to heuristic keyword detection if tags aren't present.
     """
-    Calculate score for narrative clarity.
-    
-    Args:
-        investigation_data: Investigation findings from participant
-    
-    Returns:
-        Score from 0 to 100
-    """
-    score = 0.0
-    
-    narrative = investigation_data.get('narrative', '')
-    
-    if not narrative:
-        return 0.0
-    
-    # Check narrative length (reasonable detail)
-    if len(narrative) >= 100:
-        score += 30.0
-    elif len(narrative) >= 50:
-        score += 15.0
-    
-    # Check for key terminology
-    key_terms = ['structuring', 'layering', 'suspicious', 'threshold', 
-                 'pattern', 'transaction', 'account', 'transfer']
-    terms_found = sum(1 for term in key_terms if term.lower() in narrative.lower())
-    score += min(terms_found * 10, 40)
-    
-    # Check for structured sections
-    if investigation_data.get('findings'):
-        score += 15.0
-    if investigation_data.get('recommendations'):
-        score += 15.0
-    
-    return min(score, 100.0)
+    result = FiveWsValidation()
+
+    if not sar_narrative:
+        result.missing_sections = ["WHO", "WHAT", "WHERE", "WHEN", "WHY"]
+        return result
+
+    # Try structured tag detection first
+    found_tags = set()
+    for match in SAR_FIVE_WS_PATTERN.finditer(sar_narrative):
+        tag = match.group(1).upper()
+        content = match.group(2).strip()
+        if content:
+            found_tags.add(tag)
+
+    if found_tags:
+        result.who_present = "WHO" in found_tags
+        result.what_present = "WHAT" in found_tags
+        result.where_present = "WHERE" in found_tags
+        result.when_present = "WHEN" in found_tags
+        result.why_present = "WHY" in found_tags
+    else:
+        # Heuristic fallback: check for keyword clusters
+        text_lower = sar_narrative.lower()
+        result.who_present = any(kw in text_lower for kw in ['subject', 'account id', 'name:', 'entity'])
+        result.what_present = any(kw in text_lower for kw in ['structuring', 'layering', 'suspicious', 'pattern'])
+        result.where_present = any(kw in text_lower for kw in ['branch', 'bank', 'jurisdiction', 'account'])
+        result.when_present = any(kw in text_lower for kw in ['hour', 'window', 'period', 'date', 'time'])
+        result.why_present = any(kw in text_lower for kw in ['threshold', 'evade', 'obscure', 'laundering', 'concern'])
+
+    for tag, present in [
+        ("WHO", result.who_present), ("WHAT", result.what_present),
+        ("WHERE", result.where_present), ("WHEN", result.when_present),
+        ("WHY", result.why_present),
+    ]:
+        if not present:
+            result.missing_sections.append(tag)
+
+    return result
 
 
-def _calculate_completeness(
-    investigation_data: Dict[str, Any], 
-    ground_truth: Dict[str, Any]
-) -> float:
-    """
-    Calculate completeness score based on ground truth coverage.
-    
-    Args:
-        investigation_data: Investigation findings from participant
-        ground_truth: Actual crime data
-    
-    Returns:
-        Score from 0 to 100
-    """
-    if not ground_truth:
-        return 100.0
-    
-    score = 0.0
-    total_checks = 0
-    
-    # Check if mule nodes were identified (for structuring)
-    crimes = ground_truth.get('crimes', [])
-    for crime in crimes:
-        if crime.get('crime_type') == 'structuring':
-            total_checks += 1
-            mule_id = crime.get('metadata', {}).get('mule_id')
-            suspicious_accounts = investigation_data.get('suspicious_accounts', [])
-            if mule_id and str(mule_id) in [str(a) for a in suspicious_accounts]:
-                score += 1
-        
-        if crime.get('crime_type') == 'layering':
-            total_checks += 1
-            chain_nodes = crime.get('nodes_involved', [])
-            suspicious_accounts = investigation_data.get('suspicious_accounts', [])
-            # Check if any chain nodes were identified
-            identified = sum(1 for n in chain_nodes if str(n) in [str(a) for a in suspicious_accounts])
-            if identified > 0:
-                score += identified / len(chain_nodes) if chain_nodes else 0
-    
-    if total_checks == 0:
-        return 100.0
-    
-    return round((score / total_checks) * 100, 2)
+def _compute_efficiency_score(tool_count: int) -> EfficiencyScore:
+    """Compute efficiency score from tool call count using config tiers."""
+    if tool_count <= EFFICIENCY_TIER_EXCELLENT_MAX:
+        return EfficiencyScore(tool_call_count=tool_count, tier="excellent", score=Decimal("100"))
+    elif tool_count <= EFFICIENCY_TIER_GOOD_MAX:
+        return EfficiencyScore(tool_call_count=tool_count, tier="good", score=Decimal("80"))
+    elif tool_count <= EFFICIENCY_TIER_FAIR_MAX:
+        return EfficiencyScore(tool_call_count=tool_count, tier="fair", score=Decimal("60"))
+    else:
+        raw = max(40.0 - (tool_count - EFFICIENCY_TIER_FAIR_MAX) * 0.1, 10.0)
+        return EfficiencyScore(tool_call_count=tool_count, tier="poor", score=Decimal(str(round(raw, 2))))
 
 
 def _find_missed_indicators(
@@ -1253,8 +1299,8 @@ def _find_missed_indicators(
         
         if crime_type == 'layering' and 'layering' not in identified_types:
             chain_length = metadata.get('chain_length', 0)
-            initial = metadata.get('initial_amount', 0)
-            final = metadata.get('final_amount', 0)
+            initial = float(metadata.get('initial_amount', 0))
+            final = float(metadata.get('final_amount', 0))
             missed.append(
                 f"Layering chain: {chain_length} hops, ${initial:,.2f} -> ${final:,.2f}"
             )
@@ -1309,12 +1355,17 @@ def _generate_feedback(score: float, missed_indicators: List[str]) -> str:
 # =============================================================================
 
 def _edge_to_transaction(source: str, target: str, data: Dict[str, Any]) -> Transaction:
-    """Convert graph edge to Transaction model."""
+    """Convert graph edge to Transaction model.
+
+    Handles Decimal amounts by converting to float for Pydantic serialization.
+    """
+    raw_amount = data.get("amount", 0.0)
+    amount = float(raw_amount) if isinstance(raw_amount, Decimal) else raw_amount
     return Transaction(
         transaction_id=data.get("transaction_id", str(uuid.uuid4())),
         source=str(source),
         target=str(target),
-        amount=data.get("amount", 0.0),
+        amount=amount,
         currency=data.get("currency", "USD"),
         timestamp=data.get("timestamp", datetime.now()),
         transaction_type=TransactionType(data.get("transaction_type", "wire")),

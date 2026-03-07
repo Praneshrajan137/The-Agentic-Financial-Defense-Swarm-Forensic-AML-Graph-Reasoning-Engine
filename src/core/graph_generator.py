@@ -8,10 +8,15 @@ Technical Specification:
 - Parameters: alpha=0.41, beta=0.54, gamma=0.05
 - Target: 1,000 nodes, 10,000 edges
 - Performance: < 10 seconds generation time
+
+v8.0: Decimal-everywhere for all currency amounts.
+      CRITICAL: All edge amounts are Decimal(str(value)), NEVER float.
+v7.0: Initial implementation with locale-aligned generation.
 """
 
 import networkx as nx
 from typing import Optional, List, Union, Callable, Any
+from decimal import Decimal
 import random
 import uuid
 import pickle
@@ -294,9 +299,9 @@ def _add_transaction_attributes_sdv(
             
             # Use seeded random hex instead of uuid.uuid4() for reproducibility
             G.edges[u, v, key]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
-            # Clamp amount to valid range [100, 50000]
-            amount = max(100.0, min(float(tx['amount']), 50000.0))
-            G.edges[u, v, key]['amount'] = amount
+            # Clamp amount to valid range [100, 50000] -- Decimal(str()) for safety
+            raw_amount = max(100.0, min(float(tx['amount']), 50000.0))
+            G.edges[u, v, key]['amount'] = Decimal(str(round(raw_amount, 2)))
             G.edges[u, v, key]['risk_score'] = float(tx['risk_score'])
             G.edges[u, v, key]['is_international'] = bool(tx['is_international'])
             G.edges[u, v, key]['currency'] = 'USD'
@@ -304,17 +309,17 @@ def _add_transaction_attributes_sdv(
             G.edges[u, v, key]['transaction_type'] = str(tx['transaction_type'])
             G.edges[u, v, key]['label'] = 'legitimate'
             G.edges[u, v, key]['memo'] = None
-            
+
             edge_idx += 1
     else:
         for u, v in G.edges():
             tx = tx_data[edge_idx]
-            
+
             # Use seeded random hex instead of uuid.uuid4() for reproducibility
             G.edges[u, v]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
-            # Clamp amount to valid range [100, 50000]
-            amount = max(100.0, min(float(tx['amount']), 50000.0))
-            G.edges[u, v]['amount'] = amount
+            # Clamp amount to valid range [100, 50000] -- Decimal(str()) for safety
+            raw_amount = max(100.0, min(float(tx['amount']), 50000.0))
+            G.edges[u, v]['amount'] = Decimal(str(round(raw_amount, 2)))
             G.edges[u, v]['risk_score'] = float(tx['risk_score'])
             G.edges[u, v]['is_international'] = bool(tx['is_international'])
             G.edges[u, v]['currency'] = 'USD'
@@ -322,7 +327,7 @@ def _add_transaction_attributes_sdv(
             G.edges[u, v]['transaction_type'] = str(tx['transaction_type'])
             G.edges[u, v]['label'] = 'legitimate'
             G.edges[u, v]['memo'] = None
-            
+
             edge_idx += 1
     
     logger.info(f"SDV transaction attributes assigned to {num_edges} edges")
@@ -355,7 +360,7 @@ def _add_transaction_attributes_random(
     if isinstance(G, nx.MultiDiGraph):
         for u, v, key in G.edges(keys=True):
             G.edges[u, v, key]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
-            G.edges[u, v, key]['amount'] = round(rng.uniform(100, 50000), 2)
+            G.edges[u, v, key]['amount'] = Decimal(str(round(rng.uniform(100, 50000), 2)))
             G.edges[u, v, key]['currency'] = 'USD'
             G.edges[u, v, key]['timestamp'] = base_time - timedelta(days=rng.randint(0, 365))
             G.edges[u, v, key]['transaction_type'] = rng.choice(transaction_types)
@@ -364,7 +369,7 @@ def _add_transaction_attributes_random(
     else:
         for u, v in G.edges():
             G.edges[u, v]['transaction_id'] = f"txn_{rng.getrandbits(32):08x}"
-            G.edges[u, v]['amount'] = round(rng.uniform(100, 50000), 2)
+            G.edges[u, v]['amount'] = Decimal(str(round(rng.uniform(100, 50000), 2)))
             G.edges[u, v]['currency'] = 'USD'
             G.edges[u, v]['timestamp'] = base_time - timedelta(days=rng.randint(0, 365))
             G.edges[u, v]['transaction_type'] = rng.choice(transaction_types)

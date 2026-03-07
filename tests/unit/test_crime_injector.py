@@ -14,6 +14,7 @@ Test Categories:
 import pytest
 import networkx as nx
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from src.core.crime_injector import (
     StructuringConfig,
@@ -39,8 +40,8 @@ class TestStructuringConfig:
         
         assert config.num_sources == 20
         assert config.mule_node is None
-        assert config.min_amount == 9000.0
-        assert config.max_amount == 9800.0
+        assert config.min_amount == Decimal("9000")
+        assert config.max_amount == Decimal("9800")
         assert config.time_window_hours == 48
     
     def test_custom_values(self):
@@ -48,15 +49,15 @@ class TestStructuringConfig:
         config = StructuringConfig(
             num_sources=15,
             mule_node=42,
-            min_amount=8500.0,
-            max_amount=9500.0,
+            min_amount=Decimal("8500"),
+            max_amount=Decimal("9500"),
             time_window_hours=24
         )
-        
+
         assert config.num_sources == 15
         assert config.mule_node == 42
-        assert config.min_amount == 8500.0
-        assert config.max_amount == 9500.0
+        assert config.min_amount == Decimal("8500")
+        assert config.max_amount == Decimal("9500")
         assert config.time_window_hours == 24
     
     def test_amount_range_valid(self):
@@ -71,35 +72,35 @@ class TestLayeringConfig:
     """Test suite for LayeringConfig dataclass."""
     
     def test_default_values(self):
-        """Test that default values are correct."""
+        """Test that default values are correct (Decimal for v8.0)."""
         config = LayeringConfig()
-        
+
         assert config.chain_length == 5
-        assert config.min_decay == 0.02
-        assert config.max_decay == 0.05
-        assert config.initial_amount == 100000.0
-    
+        assert config.min_decay == Decimal("0.02")
+        assert config.max_decay == Decimal("0.05")
+        assert config.initial_amount == Decimal("100000")
+
     def test_custom_values(self):
         """Test that custom values can be set."""
         config = LayeringConfig(
             chain_length=7,
-            min_decay=0.03,
-            max_decay=0.08,
-            initial_amount=50000.0
+            min_decay=Decimal("0.03"),
+            max_decay=Decimal("0.08"),
+            initial_amount=Decimal("50000")
         )
-        
+
         assert config.chain_length == 7
-        assert config.min_decay == 0.03
-        assert config.max_decay == 0.08
-        assert config.initial_amount == 50000.0
-    
+        assert config.min_decay == Decimal("0.03")
+        assert config.max_decay == Decimal("0.08")
+        assert config.initial_amount == Decimal("50000")
+
     def test_decay_range_valid(self):
         """Test that decay range is reasonable (2-5%)."""
         config = LayeringConfig()
-        
-        assert 0 < config.min_decay < config.max_decay < 1
-        assert config.min_decay == 0.02  # 2%
-        assert config.max_decay == 0.05  # 5%
+
+        assert Decimal("0") < config.min_decay < config.max_decay < Decimal("1")
+        assert config.min_decay == Decimal("0.02")  # 2%
+        assert config.max_decay == Decimal("0.05")  # 5%
 
 
 class TestInjectedCrime:
@@ -325,15 +326,15 @@ class TestInjectLayering:
     
     def test_decay_rate_in_range(self, small_graph):
         """Test that decay rate is within 2-5% per hop."""
-        config = LayeringConfig(min_decay=0.02, max_decay=0.05)
-        
+        config = LayeringConfig(min_decay=Decimal("0.02"), max_decay=Decimal("0.05"))
+
         G, crime = inject_layering(small_graph, config, seed=42)
-        
+
         amounts = [G.edges[e]['amount'] for e in crime.edges_involved]
-        
-        # Check decay rates starting from second edge
+
+        # Check decay rates starting from second edge (Decimal arithmetic)
         for i in range(2, len(amounts)):
-            decay = 1 - (amounts[i] / amounts[i - 1])
+            decay = Decimal("1") - (amounts[i] / amounts[i - 1])
             assert config.min_decay <= decay <= config.max_decay, \
                 f"Decay {decay} at hop {i} not in range [{config.min_decay}, {config.max_decay}]"
     

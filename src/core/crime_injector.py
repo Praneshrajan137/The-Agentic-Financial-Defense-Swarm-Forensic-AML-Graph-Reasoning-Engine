@@ -10,19 +10,34 @@ Supported Crime Types:
 Technical Specifications:
 - Structuring: 20 transfers to 1 mule, $9k-$9.8k each, 48hr window
 - Layering: Directed chain with 2-5% decay per hop, no cycles
+
+v8.0: Decimal-everywhere for all currency amounts.
+      CRITICAL: All amounts are Decimal(str(value)), NEVER float.
+      All magic numbers replaced with config imports.
 """
 
 import networkx as nx
 from typing import List, Tuple, Optional, Dict, Any, Union
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 import random
 import json
 import logging
 from faker import Faker
 
 from .evidence_generator import EvidenceGenerator
+from ..config import (
+    STRUCTURING_MIN_AMOUNT_USD,
+    STRUCTURING_MAX_AMOUNT_USD,
+    STRUCTURING_NUM_SOURCES,
+    STRUCTURING_TIME_WINDOW_HOURS,
+    LAYERING_DEFAULT_CHAIN_LENGTH,
+    LAYERING_MIN_DECAY,
+    LAYERING_MAX_DECAY,
+    LAYERING_INITIAL_AMOUNT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,21 +45,21 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StructuringConfig:
     """Configuration for structuring crime injection with difficulty."""
-    num_sources: int = 20
+    num_sources: int = STRUCTURING_NUM_SOURCES
     mule_node: Optional[int] = None
-    min_amount: float = 9000.0
-    max_amount: float = 9800.0
-    time_window_hours: int = 48
+    min_amount: Decimal = STRUCTURING_MIN_AMOUNT_USD
+    max_amount: Decimal = STRUCTURING_MAX_AMOUNT_USD
+    time_window_hours: int = STRUCTURING_TIME_WINDOW_HOURS
     difficulty: int = 5  # 1-10 scale: 1=trivial, 10=expert
 
 
 @dataclass
 class LayeringConfig:
     """Configuration for layering crime injection with difficulty."""
-    chain_length: int = 5
-    min_decay: float = 0.02
-    max_decay: float = 0.05
-    initial_amount: float = 100000.0
+    chain_length: int = LAYERING_DEFAULT_CHAIN_LENGTH
+    min_decay: Decimal = LAYERING_MIN_DECAY
+    max_decay: Decimal = LAYERING_MAX_DECAY
+    initial_amount: Decimal = LAYERING_INITIAL_AMOUNT
     difficulty: int = 5  # 1-10 scale: 1=trivial, 10=expert
 
 
@@ -117,18 +132,18 @@ def inject_structuring(
         # Expert: Spread over 3 months
         effective_time_window = 2160  # 90 days
     
-    # DIFFICULTY-BASED AMOUNT RANGES
+    # DIFFICULTY-BASED AMOUNT RANGES (all Decimal)
     if difficulty <= 3:
         # Trivial: Very similar amounts (easy to spot)
-        min_amt = 9500.0
-        max_amt = 9700.0
+        min_amt = Decimal("9500")
+        max_amt = Decimal("9700")
     elif difficulty <= 6:
         # Medium: Standard variance
         min_amt = config.min_amount
         max_amt = config.max_amount
     else:
         # Hard/Expert: Wider range, harder to detect
-        min_amt = max(config.min_amount - 1500, 7500.0)
+        min_amt = max(config.min_amount - Decimal("1500"), Decimal("7500"))
         max_amt = config.max_amount
     
     # Create source nodes and edges
@@ -153,8 +168,8 @@ def inject_structuring(
         )
         source_nodes.append(source_id)
         
-        # Generate amount with difficulty-based variance
-        amount = round(random.uniform(min_amt, max_amt), 2)
+        # Generate amount with difficulty-based variance (Decimal)
+        amount = Decimal(str(round(random.uniform(float(min_amt), float(max_amt)), 2)))
         amounts.append(amount)
         
         # Generate timestamp with difficulty-based spreading
@@ -192,15 +207,16 @@ def inject_structuring(
                         source_id,
                         decoy_target,
                         transaction_id=f"txn_{random.getrandbits(32):08x}",
-                        amount=round(random.uniform(50, 500), 2),
+                        amount=Decimal(str(round(random.uniform(50, 500), 2))),
                         currency='USD',
                         timestamp=timestamp + timedelta(hours=random.uniform(-24, 24)),
                         transaction_type='ach',
                         label='legitimate',
                         memo=fake.sentence(nb_words=3)
                     )
-    
+
     # Create crime record
+    total_amount = sum(amounts)  # Decimal sum
     crime = InjectedCrime(
         crime_type='structuring',
         nodes_involved=[mule_id] + source_nodes,
@@ -208,7 +224,7 @@ def inject_structuring(
         metadata={
             'mule_id': mule_id,
             'source_count': config.num_sources,
-            'total_amount': round(sum(amounts), 2),
+            'total_amount': total_amount,
             'time_window_hours': config.time_window_hours,
             'effective_time_window_hours': effective_time_window,
             'amounts': amounts,
@@ -232,7 +248,7 @@ def inject_structuring(
             subject_name=mule_name,
             crime_type='structuring',
             transaction_count=config.num_sources,
-            total_amount=round(sum(amounts), 2),
+            total_amount=total_amount,
             time_window_hours=config.time_window_hours
         )
         evidence_artifacts.append(sar)
@@ -312,19 +328,19 @@ def inject_layering(
         # Expert: Very long chain
         effective_chain_length = random.randint(15, 20)
     
-    # DIFFICULTY-BASED DECAY RATES
+    # DIFFICULTY-BASED DECAY RATES (all Decimal)
     if difficulty <= 3:
         # Trivial: Obvious decay (easy to spot)
-        min_decay = 0.04
-        max_decay = 0.06
+        min_decay = Decimal("0.04")
+        max_decay = Decimal("0.06")
     elif difficulty <= 6:
         # Medium: Standard decay
         min_decay = config.min_decay
         max_decay = config.max_decay
     else:
         # Hard/Expert: Minimal decay (harder to detect)
-        min_decay = 0.01
-        max_decay = 0.02
+        min_decay = Decimal("0.01")
+        max_decay = Decimal("0.02")
     
     # DIFFICULTY-BASED TIME INTERVALS
     if difficulty <= 3:
@@ -382,7 +398,7 @@ def inject_layering(
                         new_node,
                         decoy_target,
                         transaction_id=f"txn_{random.getrandbits(32):08x}",
-                        amount=round(random.uniform(100, 5000), 2),
+                        amount=Decimal(str(round(random.uniform(100, 5000), 2))),
                         currency='USD',
                         timestamp=datetime.now() + timedelta(hours=random.uniform(-24, 24)),
                         transaction_type='ach',
@@ -393,40 +409,41 @@ def inject_layering(
     # Add destination to chain
     chain_nodes.append(dest_node)
     
-    # Build edges with decay
+    # Build edges with decay (Decimal arithmetic throughout)
     edges_involved = []
-    amounts = []
-    decays = []
-    amount = config.initial_amount
+    amounts: List[Decimal] = []
+    decays: List[Decimal] = []
+    amount = config.initial_amount  # already Decimal from config
     base_time = datetime.now()
-    
+
     for i in range(len(chain_nodes) - 1):
         src = chain_nodes[i]
         tgt = chain_nodes[i + 1]
-        
-        # Apply decay
-        decay = random.uniform(min_decay, max_decay)
+
+        # Apply decay (convert through float for random, back to Decimal)
+        decay = Decimal(str(round(random.uniform(float(min_decay), float(max_decay)), 6)))
         decays.append(decay)
-        
+
         if i > 0:  # Don't decay the first transfer
-            amount = amount * (1 - decay)
-        
-        amounts.append(round(amount, 2))
-        
+            amount = amount * (Decimal("1") - decay)
+
+        rounded_amount = round(amount, 2)
+        amounts.append(rounded_amount)
+
         # Generate timestamp with difficulty-based velocity
         # Expert mode: Add occasional long gaps
         interval = hop_interval_minutes
         if difficulty >= 9 and i % 4 == 0:
             interval += random.randint(1440, 4320)  # Add 1-3 days gap
-        
+
         timestamp = base_time + timedelta(minutes=interval * i)
-        
+
         # Add edge
         G.add_edge(
             src,
             tgt,
             transaction_id=f"txn_{random.getrandbits(32):08x}",
-            amount=round(amount, 2),
+            amount=rounded_amount,
             currency='USD',
             timestamp=timestamp,
             transaction_type='wire',
@@ -450,8 +467,8 @@ def inject_layering(
             'chain_length': config.chain_length,
             'effective_chain_length': effective_chain_length,
             'initial_amount': config.initial_amount,
-            'final_amount': round(amounts[-1], 2),
-            'total_decay': round(1 - (amounts[-1] / config.initial_amount), 4),
+            'final_amount': amounts[-1],
+            'total_decay': round(Decimal("1") - (amounts[-1] / config.initial_amount), 4),
             'amounts': amounts,
             'decays': decays,
             'difficulty': difficulty,
@@ -482,7 +499,7 @@ def inject_layering(
         # Generate conflicting evidence (GOLD MEDAL FEATURE)
         # This tests hallucination resistance
         if len(chain_nodes) > 1:
-            first_amount = amounts[0] if amounts else config.initial_amount
+            first_amount = float(amounts[0]) if amounts else float(config.initial_amount)
             conflicts = evidence_gen.generate_conflicting_evidence(
                 subject_id=str(chain_nodes[1]),  # First intermediate node
                 actual_amount=first_amount,
