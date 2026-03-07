@@ -16,6 +16,7 @@ import networkx as nx
 from faker import Faker
 from typing import List, Tuple, Dict, Any
 from datetime import datetime, timedelta
+from decimal import Decimal
 import random
 import sys
 from pathlib import Path
@@ -51,9 +52,9 @@ def small_graph() -> nx.DiGraph:
         G.nodes[node]['entity_type'] = random.choice(['person', 'company', 'bank'])
         G.nodes[node]['risk_score'] = round(random.uniform(0, 1), 2)
     
-    # Add edge attributes
+    # Add edge attributes (Decimal amounts for v8.0 parity)
     for u, v in G.edges():
-        G.edges[u, v]['amount'] = round(random.uniform(100, 10000), 2)
+        G.edges[u, v]['amount'] = Decimal(str(round(random.uniform(100, 10000), 2)))
         G.edges[u, v]['timestamp'] = datetime.now().isoformat()
         G.edges[u, v]['label'] = 'legitimate'
     
@@ -92,7 +93,7 @@ def baseline_graph() -> nx.DiGraph:
     base_time = datetime.now()
     for u, v in G.edges():
         G.edges[u, v]['transaction_id'] = f"txn_{random.randint(10000, 99999)}"
-        G.edges[u, v]['amount'] = round(random.uniform(100, 50000), 2)
+        G.edges[u, v]['amount'] = Decimal(str(round(random.uniform(100, 50000), 2)))
         G.edges[u, v]['currency'] = 'USD'
         G.edges[u, v]['timestamp'] = (base_time - timedelta(days=random.randint(0, 365))).isoformat()
         G.edges[u, v]['transaction_type'] = random.choice(['wire', 'ach', 'cash'])
@@ -199,9 +200,9 @@ def valid_structuring_edges() -> List[Tuple[int, int, Dict[str, Any]]]:
     
     for i in range(20):
         source_id = 200 + i
-        amount = round(random.uniform(9000, 9800), 2)
+        amount = Decimal(str(round(random.uniform(9000, 9800), 2)))
         timestamp = base_time + timedelta(hours=random.randint(0, 48))
-        
+
         edges.append((
             source_id,
             mule_id,
@@ -224,10 +225,10 @@ def invalid_structuring_edges() -> List[Tuple[int, int, Dict[str, Any]]]:
         List of edges targeting multiple mules (invalid pattern)
     """
     edges = [
-        (1, 100, {'amount': 9500, 'label': 'structuring'}),  # Target 100
-        (2, 100, {'amount': 9200, 'label': 'structuring'}),
-        (3, 200, {'amount': 9700, 'label': 'structuring'}),  # Target 200 - invalid!
-        (4, 100, {'amount': 9100, 'label': 'structuring'}),
+        (1, 100, {'amount': Decimal("9500"), 'label': 'structuring'}),  # Target 100
+        (2, 100, {'amount': Decimal("9200"), 'label': 'structuring'}),
+        (3, 200, {'amount': Decimal("9700"), 'label': 'structuring'}),  # Target 200 - invalid!
+        (4, 100, {'amount': Decimal("9100"), 'label': 'structuring'}),
     ]
     return edges
 
@@ -339,8 +340,8 @@ def create_graph_with_crime_labels(
     # Label all edges as legitimate
     for u, v in G.edges():
         G.edges[u, v]['label'] = 'legitimate'
-        G.edges[u, v]['amount'] = round(random.uniform(100, 50000), 2)
-    
+        G.edges[u, v]['amount'] = Decimal(str(round(random.uniform(100, 50000), 2)))
+
     # Add structuring edges
     if structuring_count > 0:
         mule = max(G.nodes()) + 1
@@ -348,6 +349,6 @@ def create_graph_with_crime_labels(
         for i in range(structuring_count):
             source = mule + 1 + i
             G.add_node(source)
-            G.add_edge(source, mule, label='structuring', amount=round(random.uniform(9000, 9800), 2))
+            G.add_edge(source, mule, label='structuring', amount=Decimal(str(round(random.uniform(9000, 9800), 2))))
     
     return G

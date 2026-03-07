@@ -78,7 +78,7 @@ class TestHealthEndpoint:
         data = response.json()
         
         assert "version" in data
-        assert data["version"] == "7.0.0"
+        assert data["version"] == "8.0.0"
     
     def test_health_shows_no_graph_loaded(self, client):
         """Test that health shows graph_loaded=False when no graph."""
@@ -126,7 +126,7 @@ class TestAgentManifestEndpoint:
         data = response.json()
         
         assert "version" in data
-        assert data["version"] == "7.0.0"
+        assert data["version"] == "8.0.0"
     
     def test_manifest_has_capabilities(self, client):
         """Test that manifest lists capabilities."""

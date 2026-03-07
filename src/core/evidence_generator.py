@@ -10,15 +10,39 @@ This forces the Purple Agent to combine:
 3. Graph querying (following the extracted IDs)
 
 This is the "Sherlock Holmes" upgrade that makes the platform cognitively challenging.
+
+v8.0: Decimal-everywhere for currency amounts. Dual-jurisdiction (FinCEN + FIU-IND).
+      CRITICAL: All amounts passed as Decimal|float; formatted via _fmt_amount().
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime, timedelta
+from decimal import Decimal
 import random
 from faker import Faker
 import logging
 
+from ..config import (
+    TIMEZONE_FINCEN,
+    TIMEZONE_FIU_IND,
+    EVIDENCE_DISCREPANCY_THRESHOLD_USD,
+    EVIDENCE_DISCREPANCY_THRESHOLD_INR,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _fmt_amount(amount: Union[Decimal, float, int], currency: str = "USD") -> str:
+    """Format a monetary amount for display in evidence text.
+
+    Accepts Decimal, float, or int. Returns '$1,234.56' for USD,
+    '₹1,23,456.00' for INR (Indian numbering not implemented here,
+    uses standard comma formatting).
+    """
+    val = float(amount) if isinstance(amount, Decimal) else amount
+    if currency == "INR":
+        return f"₹{val:,.2f}"
+    return f"${val:,.2f}"
 
 
 class EvidenceGenerator:
@@ -38,30 +62,47 @@ class EvidenceGenerator:
         subject_name: str,
         crime_type: str,
         transaction_count: int,
-        total_amount: float,
-        time_window_hours: int
+        total_amount: Union[Decimal, float],
+        time_window_hours: int,
+        currency: str = "USD",
     ) -> Dict[str, Any]:
         """
         Generate a Suspicious Activity Report (SAR) narrative.
-        
+
+        Supports dual-jurisdiction: FinCEN (USD) and FIU-IND (INR).
+
         Args:
             subject_id: Entity ID of the subject
             subject_name: Name of the subject
             crime_type: "structuring" or "layering"
             transaction_count: Number of transactions involved
-            total_amount: Total amount involved
+            total_amount: Total amount involved (Decimal or float)
             time_window_hours: Time window of suspicious activity
-            
+            currency: "USD" (FinCEN) or "INR" (FIU-IND)
+
         Returns:
             Dictionary with SAR document structure
         """
+        amount_str = _fmt_amount(total_amount, currency)
         file_number = f"SAR-{random.randint(100000, 999999)}"
         date_filed = datetime.now().strftime('%Y-%m-%d')
-        
+
+        if currency == "INR":
+            regulator = "FIU-IND"
+            act_name = "Prevention of Money Laundering Act (PMLA)"
+            threshold_label = "₹10,00,000 CTR threshold"
+            timezone = TIMEZONE_FIU_IND
+        else:
+            regulator = "FinCEN"
+            act_name = "Bank Secrecy Act"
+            threshold_label = "$10,000 Currency Transaction Report (CTR) threshold"
+            timezone = TIMEZONE_FINCEN
+
         if crime_type == "structuring":
             narrative = f"""SUSPICIOUS ACTIVITY REPORT
 File Number: {file_number}
 Date Filed: {date_filed}
+Jurisdiction: {regulator}
 
 SUBJECT INFORMATION:
 Name: {subject_name}
@@ -69,18 +110,17 @@ Account ID: {subject_id}
 Entity Type: Individual/Business
 
 NARRATIVE:
-Subject {subject_name} (Account ID: {subject_id}) has engaged in a pattern of 
-financial activity that appears designed to evade Bank Secrecy Act reporting 
-requirements. Specifically, the subject received {transaction_count} cash deposits 
-over a {time_window_hours}-hour period, totaling approximately ${total_amount:,.2f}.
+Subject {subject_name} (Account ID: {subject_id}) has engaged in a pattern of
+financial activity that appears designed to evade {act_name} reporting
+requirements. Specifically, the subject received {transaction_count} cash deposits
+over a {time_window_hours}-hour period, totaling approximately {amount_str}.
 
-Each individual transaction was structured to remain below the $10,000 Currency 
-Transaction Report (CTR) threshold, with amounts ranging from $9,000 to $9,800. 
-The temporal clustering and amount patterns are consistent with "smurfing" or 
-"structuring" typology as defined in FinCEN guidance.
+Each individual transaction was structured to remain below the {threshold_label},
+with amounts exhibiting clustering patterns consistent with "smurfing" or
+"structuring" typology as defined in {regulator} guidance.
 
-The branch manager reported that multiple individuals, appearing to act in 
-coordination, made these deposits. Several stated the funds were for "business 
+The branch manager reported that multiple individuals, appearing to act in
+coordination, made these deposits. Several stated the funds were for "business
 expenses" but could not provide coherent explanations when questioned.
 
 RECOMMENDATION: File SAR and monitor for continued activity."""
@@ -88,6 +128,7 @@ RECOMMENDATION: File SAR and monitor for continued activity."""
             narrative = f"""SUSPICIOUS ACTIVITY REPORT
 File Number: {file_number}
 Date Filed: {date_filed}
+Jurisdiction: {regulator}
 
 SUBJECT INFORMATION:
 Name: {subject_name}
@@ -95,20 +136,20 @@ Account ID: {subject_id}
 Entity Type: Individual/Business
 
 NARRATIVE:
-Subject {subject_name} (Account ID: {subject_id}) initiated a complex series of 
-rapid wire transfers totaling approximately ${total_amount:,.2f} through {transaction_count} 
+Subject {subject_name} (Account ID: {subject_id}) initiated a complex series of
+rapid wire transfers totaling approximately {amount_str} through {transaction_count}
 intermediary accounts within a {time_window_hours}-hour window.
 
-The transaction pattern exhibits characteristics consistent with "layering" - 
-the second stage of money laundering where funds are moved through multiple 
-accounts to obscure the audit trail. Each transfer showed a 2-5% reduction in 
+The transaction pattern exhibits characteristics consistent with "layering" -
+the second stage of money laundering where funds are moved through multiple
+accounts to obscure the audit trail. Each transfer showed a 2-5% reduction in
 value, potentially representing fees paid to mule account operators.
 
-The velocity of transfers (multiple hops within {time_window_hours} hours) and 
+The velocity of transfers (multiple hops within {time_window_hours} hours) and
 the lack of apparent economic purpose raise significant AML concerns.
 
 RECOMMENDATION: Immediate investigation and possible law enforcement referral."""
-        
+
         return {
             "document_type": "SAR",
             "file_number": file_number,
@@ -118,7 +159,9 @@ RECOMMENDATION: Immediate investigation and possible law enforcement referral.""
             "date": datetime.now().isoformat(),
             "narrative": narrative.strip(),
             "body": narrative.strip(),
-            "crime_type": crime_type
+            "crime_type": crime_type,
+            "currency": currency,
+            "jurisdiction": regulator,
         }
     
     def generate_internal_email(
@@ -206,72 +249,81 @@ Investigation required within 24 hours per BSA requirements."""
     def generate_conflicting_evidence(
         self,
         subject_id: str,
-        actual_amount: float,
-        graph_amount: float
+        actual_amount: Union[Decimal, float],
+        graph_amount: Union[Decimal, float],
+        currency: str = "USD",
     ) -> List[Dict[str, Any]]:
         """
         Generate CONFLICTING documents to test hallucination resistance.
-        
+
         This is the GOLD MEDAL feature. We create:
-        - Email says "$10,000"
-        - Graph says "$9,500"
-        - Receipt says "$9,500"
-        
+        - Email says "$10,000" (wrong -- human error)
+        - Graph says "$9,500" (correct)
+        - Receipt says "$9,500" (correct)
+
         The Purple Agent must determine which source is reliable.
-        
+
         Args:
             subject_id: Entity ID
-            actual_amount: The TRUE amount (in graph)
+            actual_amount: The TRUE amount (in graph), Decimal or float
             graph_amount: What the graph shows (should match actual)
-            
+            currency: "USD" or "INR"
+
         Returns:
             List of documents with intentional conflicts
         """
-        # Email with WRONG amount (human error)
+        actual_str = _fmt_amount(actual_amount, currency)
+        graph_str = _fmt_amount(graph_amount, currency)
+
+        # Email with WRONG amount (human error) -- always rounds up
+        wrong_amount = round(float(actual_amount) * 1.05, -3)  # Round to nearest $1000
+        wrong_str = _fmt_amount(wrong_amount, currency)
+
         email = {
             "document_type": "email",
             "subject_id": subject_id,
             "date": datetime.now().isoformat(),
-            "body": f"""I just processed a wire transfer for account {subject_id}. 
-The customer said they were sending around $10,000 for a car purchase.
+            "body": f"""I just processed a wire transfer for account {subject_id}.
+The customer said they were sending around {wrong_str} for a car purchase.
 Seemed routine to me.""",
-            "narrative": f"""I just processed a wire transfer for account {subject_id}. 
-The customer said they were sending around $10,000 for a car purchase.
+            "narrative": f"""I just processed a wire transfer for account {subject_id}.
+The customer said they were sending around {wrong_str} for a car purchase.
 Seemed routine to me.""",
             "reliability": "low",  # Hint: human memory is unreliable
-            "stated_amount": 10000.0
+            "stated_amount": wrong_amount,
+            "currency": currency,
         }
-        
+
         # Receipt with CORRECT amount
+        receipt_body = f"""WIRE TRANSFER RECEIPT
+Account: {subject_id}
+Amount: {actual_str}
+Date: {datetime.now().strftime('%Y-%m-%d')}
+Confirmation: WT-{random.randint(100000, 999999)}"""
+
         receipt = {
             "document_type": "receipt",
             "subject_id": subject_id,
             "date": datetime.now().isoformat(),
-            "body": f"""WIRE TRANSFER RECEIPT
-Account: {subject_id}
-Amount: ${actual_amount:,.2f}
-Date: {datetime.now().strftime('%Y-%m-%d')}
-Confirmation: WT-{random.randint(100000, 999999)}""",
-            "narrative": f"""WIRE TRANSFER RECEIPT
-Account: {subject_id}
-Amount: ${actual_amount:,.2f}
-Date: {datetime.now().strftime('%Y-%m-%d')}
-Confirmation: WT-{random.randint(100000, 999999)}""",
+            "body": receipt_body,
+            "narrative": receipt_body,
             "reliability": "high",  # Hint: receipts are authoritative
-            "stated_amount": actual_amount
+            "stated_amount": float(actual_amount),
+            "currency": currency,
         }
-        
+
         # Graph database (CORRECT)
         graph_record = {
             "document_type": "database",
             "subject_id": subject_id,
             "date": datetime.now().isoformat(),
-            "amount": graph_amount,
-            "body": f"Database record: Account {subject_id}, Amount: ${graph_amount:,.2f}",
-            "narrative": f"Database record: Account {subject_id}, Amount: ${graph_amount:,.2f}",
-            "reliability": "high"
+            "amount": float(graph_amount),
+            "body": f"Database record: Account {subject_id}, Amount: {graph_str}",
+            "narrative": f"Database record: Account {subject_id}, Amount: {graph_str}",
+            "reliability": "high",
+            "currency": currency,
         }
-        
+
         return [email, receipt, graph_record]
     
     def generate_needle_in_haystack(
@@ -422,4 +474,4 @@ Standard documentation collected. No issues noted.""",
         return f'Entity {node_id}'
 
 
-__all__ = ['EvidenceGenerator']
+__all__ = ['EvidenceGenerator', '_fmt_amount']
