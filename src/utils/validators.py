@@ -5,13 +5,17 @@ Data integrity and graph validation utilities.
 
 Validation Categories:
 1. Graph structure validation
-2. Transaction amount validation
+2. Transaction amount validation (Decimal-aware)
 3. Crime pattern validation
 4. Statistical distribution validation
+5. Amount type validation (v8.0)
+
+v8.0: All amount comparisons are Decimal-safe. Added validate_decimal_amounts().
 """
 
 import networkx as nx
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
+from decimal import Decimal
 import statistics
 
 
@@ -89,8 +93,8 @@ def validate_scale_free_distribution(G: nx.DiGraph, tolerance: float = 0.1) -> T
 
 def validate_structuring_pattern(
     edges: List[Tuple[int, int, dict]],
-    min_amount: float = 9000.0,
-    max_amount: float = 9800.0,
+    min_amount: Union[Decimal, float] = Decimal("9000"),
+    max_amount: Union[Decimal, float] = Decimal("9800"),
     max_time_window_hours: int = 48
 ) -> Tuple[bool, List[str]]:
     """
@@ -227,10 +231,41 @@ def validate_no_data_leakage(
     return True, []
 
 
+def validate_decimal_amounts(G: nx.DiGraph) -> Tuple[bool, List[str]]:
+    """
+    Validate that all edge amounts are Decimal (v8.0 requirement).
+
+    This ensures the Decimal-everywhere discipline is maintained.
+    Any float amounts are flagged as violations.
+
+    Args:
+        G: NetworkX DiGraph with edge amounts
+
+    Returns:
+        Tuple of (all_decimal, list of violation messages)
+    """
+    violations = []
+
+    edges = G.edges(data=True)
+    for u, v, data in edges:
+        amount = data.get('amount')
+        if amount is not None and not isinstance(amount, Decimal):
+            violations.append(
+                f"Edge {u}->{v}: amount {amount!r} is {type(amount).__name__}, expected Decimal"
+            )
+        # Stop after 20 violations to avoid flooding
+        if len(violations) >= 20:
+            violations.append(f"... and more (stopped after 20)")
+            break
+
+    return len(violations) == 0, violations
+
+
 __all__ = [
     'validate_graph_structure',
     'validate_scale_free_distribution',
     'validate_structuring_pattern',
     'validate_layering_pattern',
-    'validate_no_data_leakage'
+    'validate_no_data_leakage',
+    'validate_decimal_amounts',
 ]

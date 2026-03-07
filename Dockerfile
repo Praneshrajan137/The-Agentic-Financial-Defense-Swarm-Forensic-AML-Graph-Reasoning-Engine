@@ -1,10 +1,12 @@
-# Green Financial Crime Agent v7.0
+# Green Financial Crime Agent v8.0
 # The Panopticon Protocol: Zero-Failure Synthetic Financial Crime Simulator
 #
 # Build: docker build -t green-financial-crime-agent .
 # Run:   docker run -p 9090:9090 green-financial-crime-agent
 #
 # Purple Agent connects to this server at http://localhost:9090/a2a
+#
+# v8.0: Non-root user for security parity with Purple Agent.
 
 FROM python:3.11-slim
 
@@ -58,12 +60,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # STAGE 3: APPLICATION CODE
 # ============================================================================
 
-COPY . .
-RUN mkdir -p /mnt/user-data/outputs /app/outputs /app/data
+# Create non-root user (security parity with Purple Agent)
+RUN groupadd --gid 1000 green && \
+    useradd --uid 1000 --gid green --create-home green
+
+COPY --chown=green:green . .
+RUN mkdir -p /mnt/user-data/outputs /app/outputs /app/data && \
+    chown -R green:green /mnt/user-data /app/outputs /app/data
 
 # ============================================================================
 # STAGE 4: HEALTH & RUNTIME CONFIGURATION
 # ============================================================================
+
+# Switch to non-root user
+USER green
 
 EXPOSE 9090
 
